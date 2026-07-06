@@ -1,0 +1,19 @@
+{
+  "tags": [
+    "toro", "torito", "perú", "cerámica", "escultura",
+    "protección", "tejado", "casa", "suerte", "tradición"
+  ],
+  "scale": 1.0,
+  "movement": {
+    "base":   { "type": "bucle", "period": [30, 60], "radius": [0.8, 2.0], "mutation": 0.08 },
+    "time":   { "type": "playback", "freezesPerMinute": 4, "freezeMs": [200, 800], "rewindChance": 0.15 },
+    "layers": [
+      { "type": "jitter", "amplitude": 0.008, "frequency": 14, "intermittent": true },
+      { "type": "respiracion", "amount": 0.015, "period": [6, 14] }
+    ],
+    "mesh": [
+      { "type": "costura", "coverage": 0.22, "speed": 0.06, "opacity": 0.5 },
+      { "type": "desgarro", "interval": [30, 120], "duration": 0.7, "strength": 0.22 }
+    ]
+  }
+}
