@@ -235,6 +235,7 @@ async function loadObject(meta, index, total) {
     root = new THREE.Group();
     root.add(gltf.scene);
     normalize(gltf.scene, CONFIG.targetSize, meta.scale ?? 1);
+    root.userData.isModel = true; // deja huella de silueta al moverse
   }
   root.position.copy(spawnPosition(index, total));
   root.userData.meta = meta;
@@ -309,6 +310,7 @@ function spawnFallback() {
     const root = new THREE.Group();
     root.add(makeBrokenMesh(i * 7.3));
     root.position.copy(spawnPosition(i, FALLBACK_MOVEMENTS.length));
+    root.userData.isModel = true;
     scene.add(root);
     attachController(root, { file: null, tags: ['fallback'], movement }, `fallback-${i}`);
   });
@@ -365,7 +367,7 @@ function animate() {
     }
   }
 
-  if (trails) trails.update(dt, objects);
+  if (trails) trails.update(dt, objects, camera);
   if (connections) connections.update(dt, objects);
 
   controls.update();

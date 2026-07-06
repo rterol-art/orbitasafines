@@ -111,5 +111,5 @@ Si el nombre del .json no coincide con el del archivo, declara:
 EFECTOS DE ESCENA (globales, automáticos)
 ═══════════════════════════════════════════════════════
 - Líneas finas que conectan elementos cercanos de forma intermitente.
-- Estela suave que dejan imágenes y textos a su paso.
+- Estela: imágenes y textos dejan eco de su silueta; los modelos 3D dejan una huella suave (mancha con su color medio, muy sutil) — el rastro de que algo pasó, no un duplicado.
 Ambos se activan solos. Se desactivan en CONFIG (main.js) si molestan.

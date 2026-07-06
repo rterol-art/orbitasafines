@@ -240,36 +240,34 @@ export class Trails {
     this.every = opts.every ?? 0.18;      // s entre muestras
     this.life = opts.life ?? 1.4;         // vida de cada eco
     this.maxOpacity = opts.maxOpacity ?? 0.16;
-    this.samples = [];                    // { mesh, age }
+    this.printOpacity = opts.printOpacity ?? 0.07; // huella de 3D: aún más sutil
+    this.samples = [];                    // { mesh, age, base }
     this._acc = 0;
+    this._softTex = makeSoftDiscTexture(); // gradiente radial compartido
   }
 
-  // Registra ecos de los elementos que tengan una "silueta" barata (imágenes
-  // y textos: planos con textura). Los GLB no dejan estela — sería costoso y
-  // visualmente ruidoso; su presencia ya es densa.
-  update(dt, objects) {
+  // Imágenes y textos dejan eco de su propia textura (silueta real, barata).
+  // Los modelos 3D dejan una HUELLA: un disco suave orientado a cámara, con
+  // el color medio del modelo y el tamaño de su bounding box. No es un
+  // duplicado del cuerpo — es la mancha de que algo pasó por ahí. La
+  // imprecisión es deliberada: presencia sin identidad, más fantasmal.
+  update(dt, objects, camera) {
     this._acc += dt;
     const emit = this._acc >= this.every;
     if (emit) this._acc = 0;
 
-    for (const o of objects) {
-      const plane = o.root.userData.textPlane
-        || (o.root.userData.isImage ? o.root.children[0] : null);
-      if (emit && plane && plane.material.map) {
-        const echo = new THREE.Mesh(
-          plane.geometry,
-          new THREE.MeshBasicMaterial({
-            map: plane.material.map, transparent: true,
-            opacity: this.maxOpacity, depthWrite: false,
-            side: THREE.DoubleSide, toneMapped: false,
-            blending: THREE.AdditiveBlending,
-          })
-        );
-        o.root.getWorldPosition(echo.position);
-        echo.quaternion.copy(o.root.getWorldQuaternion(_qTrail));
-        echo.scale.copy(o.root.scale);
-        this.scene.add(echo);
-        this.samples.push({ mesh: echo, age: 0 });
+    if (emit) {
+      for (const o of objects) {
+        const plane = o.root.userData.textPlane
+          || (o.root.userData.isImage ? o.root.children[0] : null);
+
+        if (plane && plane.material.map) {
+          // Eco de plano: clona su textura tal cual
+          this._emitPlaneEcho(o.root, plane, this.maxOpacity);
+        } else if (o.root.userData.isModel) {
+          // Huella de silueta: disco suave con el color/tamaño cacheados
+          this._emitFootprint(o.root, camera);
+        }
       }
     }
 
@@ -283,9 +281,94 @@ export class Trails {
         s.mesh.material.dispose();
         this.samples.splice(i, 1);
       } else {
-        s.mesh.material.opacity = this.maxOpacity * (1 - p);
+        // desvanecimiento suave (ease-out cuadrático)
+        s.mesh.material.opacity = s.base * (1 - p) * (1 - p);
+        // la huella de 3D siempre mira a cámara mientras se desvanece
+        if (s.billboard && camera) s.mesh.quaternion.copy(camera.quaternion);
       }
     }
   }
+
+  _emitPlaneEcho(root, plane, opacity) {
+    const echo = new THREE.Mesh(plane.geometry, new THREE.MeshBasicMaterial({
+      map: plane.material.map, transparent: true, opacity,
+      depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
+      blending: THREE.AdditiveBlending,
+    }));
+    root.getWorldPosition(echo.position);
+    echo.quaternion.copy(root.getWorldQuaternion(_qTrail));
+    echo.scale.copy(root.scale);
+    this.scene.add(echo);
+    this.samples.push({ mesh: echo, age: 0, base: opacity, billboard: false });
+  }
+
+  _emitFootprint(root, camera) {
+    // color y radio se cachean la primera vez (coste amortizado)
+    let cache = root.userData.footprint;
+    if (!cache) {
+      cache = computeFootprint(root);
+      root.userData.footprint = cache;
+    }
+    const echo = new THREE.Mesh(_discGeo, new THREE.MeshBasicMaterial({
+      map: this._softTex, color: cache.color, transparent: true,
+      opacity: this.printOpacity, depthWrite: false, side: THREE.DoubleSide,
+      toneMapped: false, blending: THREE.AdditiveBlending,
+    }));
+    root.getWorldPosition(echo.position);
+    const r = cache.radius * (root.scale.x || 1);
+    echo.scale.setScalar(r * 2);
+    if (camera) echo.quaternion.copy(camera.quaternion);
+    this.scene.add(echo);
+    this.samples.push({ mesh: echo, age: 0, base: this.printOpacity, billboard: true });
+  }
 }
 const _qTrail = new THREE.Quaternion();
+const _discGeo = new THREE.PlaneGeometry(1, 1);
+
+// Textura de disco suave (gradiente radial blanco→transparente) generada
+// una vez. Da a la huella bordes difusos sin recorte duro.
+function makeSoftDiscTexture() {
+  const s = 64;
+  const c = document.createElement('canvas');
+  c.width = c.height = s;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.5, 'rgba(255,255,255,0.5)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, s, s);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// Calcula color medio (muestreando vértices/material) y radio proyectado
+// de un modelo. Se ejecuta una sola vez por objeto.
+function computeFootprint(root) {
+  const box = new THREE.Box3().setFromObject(root);
+  const size = box.getSize(new THREE.Vector3());
+  const radius = Math.max(size.x, size.y) * 0.5 || 0.8;
+
+  const color = new THREE.Color(0x000000);
+  let n = 0;
+  root.traverse(o => {
+    if (o.isMesh && o.material) {
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) {
+        // Ignora el blanco puro por defecto de materiales sin color asignado:
+        // una huella blanca deslumbraría sobre el negro.
+        if (m.color && !(m.color.r === 1 && m.color.g === 1 && m.color.b === 1)) {
+          color.add(m.color); n++;
+        }
+      }
+    }
+  });
+  if (n > 0) color.multiplyScalar(1 / n);
+  else color.setHex(0x9c93b8); // lila de respaldo
+  // asegurar que la mancha se lee sobre negro sin quemar
+  const hsl = {};
+  color.getHSL(hsl);
+  color.setHSL(hsl.h, hsl.s, THREE.MathUtils.clamp(hsl.l + 0.05, 0.15, 0.6));
+  return { color, radius };
+}
