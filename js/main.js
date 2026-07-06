@@ -1,5 +1,5 @@
 // ============================================================
-// espacio — Fases 1+2
+// espacio — Fases 1 + 2 + media (imágenes, textos, líneas, estelas)
 // Escena negra + IBL + carga desde manifest + comportamientos
 // ============================================================
 
@@ -11,6 +11,7 @@ import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MovementController, TearScheduler, makeRng } from './behaviors.js';
+import { buildImage, buildText, updateBillboard, ConnectionLines, Trails } from './media.js';
 
 // ---------- Configuración ----------
 const CONFIG = {
@@ -18,6 +19,8 @@ const CONFIG = {
   spawnRadius: 6,
   targetSize: 1.6,
   envIntensity: 1.0,
+  connections: true,   // líneas finas intermitentes entre elementos
+  trails: true,        // estela suave de imágenes y textos
 };
 
 // ---------- Escena base ----------
@@ -75,6 +78,10 @@ const tearScheduler = new TearScheduler();          // 1 desgarro a la vez en to
 const timeUniform = { value: 0 };                   // reloj global para shaders (costura)
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+// Efectos de escena (se inicializan tras cargar, cuando hay elementos)
+let connections = null;
+let trails = null;
+
 // ---------- Utilidades ----------
 function setHud(text, fade = false) {
   hud.textContent = text;
@@ -113,8 +120,10 @@ function spawnPosition(index, total) {
 }
 
 function attachController(root, meta, seedKey) {
+  const seed = hashString(seedKey);
+  root.userData.seed = (seed % 1000) / 100; // para el temblor del billboard
   const controller = reducedMotion ? null : new MovementController(root, meta.movement, {
-    seed: hashString(seedKey),
+    seed,
     tearScheduler,
     timeUniform,
   });
@@ -149,19 +158,12 @@ async function loadCatalog() {
       );
       if (res.ok) {
         const listing = await res.json();
-        const glbs = new Set(
-          listing.filter(f => f.name.endsWith('.glb')).map(f => f.name)
-        );
+        const present = new Set(listing.map(f => f.name));
         const jsons = listing.filter(f => f.name.endsWith('.json'));
         const metas = await Promise.all(jsons.map(async f => {
           try {
             const meta = await (await fetch(`./objects/${f.name}`, { cache: 'no-store' })).json();
-            const glb = meta.file ?? f.name.replace(/\.json$/, '.glb');
-            if (!glbs.has(glb)) {
-              console.warn(`[espacio] ${f.name}: no existe objects/${glb}`);
-              return null;
-            }
-            return { ...meta, file: glb };
+            return resolveMeta(meta, f.name, present);
           } catch (e) {
             console.warn(`[espacio] ${f.name}: JSON inválido —`, e.message);
             return null;
@@ -180,22 +182,67 @@ async function loadCatalog() {
     const res = await fetch('./manifest.json', { cache: 'no-store' });
     if (res.ok) {
       const manifest = await res.json();
-      if (Array.isArray(manifest.objects)) return manifest.objects;
+      if (Array.isArray(manifest.objects)) {
+        return manifest.objects
+          .map(m => resolveMeta(m, m.file ?? '', new Set(manifest.objects.flatMap(o => o.file ? [o.file] : []))))
+          .filter(Boolean);
+      }
     }
   } catch { /* sin respaldo local: fallback procedural */ }
 
   return [];
 }
 
+// Determina el tipo de cada entrada y valida que su archivo exista.
+// Tipo explícito ("type") o inferido del archivo hermano / extensión.
+function resolveMeta(meta, jsonName, present) {
+  const base = jsonName.replace(/\.json$/, '');
+  let type = meta.type;
+  let file = meta.file;
+
+  if (!type) {
+    // Inferir: ¿hay un .glb, .png hermano? ¿o es texto?
+    if (file) {
+      type = /\.glb$/i.test(file) ? 'model' : /\.png$/i.test(file) ? 'image' : null;
+    } else if (present.has(base + '.glb')) { type = 'model'; file = base + '.glb'; }
+    else if (present.has(base + '.png')) { type = 'image'; file = base + '.png'; }
+    else if (meta.text != null) { type = 'text'; }
+  }
+  if (!file && (type === 'model' || type === 'image')) {
+    file = base + (type === 'model' ? '.glb' : '.png');
+  }
+
+  if (type === 'text') return { ...meta, type: 'text' };
+  if (type === 'model' || type === 'image') {
+    if (present.size && !present.has(file)) {
+      console.warn(`[espacio] ${jsonName}: no existe objects/${file}`);
+      return null;
+    }
+    return { ...meta, type, file };
+  }
+  console.warn(`[espacio] ${jsonName}: tipo no reconocido (falta type/file/text)`);
+  return null;
+}
+
 async function loadObject(meta, index, total) {
-  const gltf = await gltfLoader.loadAsync(`./objects/${meta.file}`);
-  const root = new THREE.Group();
-  root.add(gltf.scene);
-  normalize(gltf.scene, CONFIG.targetSize, meta.scale ?? 1);
+  let root;
+  if (meta.type === 'image') {
+    root = await buildImage(`./objects/${meta.file}`, meta);
+  } else if (meta.type === 'text') {
+    root = buildText(meta);
+  } else { // model
+    const gltf = await gltfLoader.loadAsync(`./objects/${meta.file}`);
+    root = new THREE.Group();
+    root.add(gltf.scene);
+    normalize(gltf.scene, CONFIG.targetSize, meta.scale ?? 1);
+  }
   root.position.copy(spawnPosition(index, total));
   root.userData.meta = meta;
   scene.add(root);
-  attachController(root, meta, meta.file);
+
+  // Los billboards (texto) no reciben rotación de comportamiento: el bucle
+  // los orienta a cámara. Reciben solo movimiento traslacional.
+  attachController(root, meta, meta.file ?? `text-${index}`);
 }
 
 // ---------- Fallback procedural ----------
@@ -293,6 +340,12 @@ async function init() {
       .forEach(r => console.warn('[espacio] objeto no cargado:', r.reason));
     setHud(`${objects.length} objetos`, true);
   }
+
+  // Efectos de escena: una vez hay elementos en la escena
+  if (!reducedMotion) {
+    if (CONFIG.connections) connections = new ConnectionLines(scene);
+    if (CONFIG.trails) trails = new Trails(scene);
+  }
 }
 
 // ---------- Bucle ----------
@@ -301,11 +354,19 @@ const clock = new THREE.Clock();
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.1); // clamp: pestañas en background
-  timeUniform.value = clock.elapsedTime;
+  const t = clock.elapsedTime;
+  timeUniform.value = t;
 
   for (const o of objects) {
-    if (o.controller) o.controller.update(dt, clock.elapsedTime);
+    if (o.controller) o.controller.update(dt, t);
+    // Los textos miran a cámara con temblor, tras el movimiento traslacional
+    if (o.root.userData.billboard) {
+      updateBillboard(o.root, camera, t, o.root.userData.seed ?? 0);
+    }
   }
+
+  if (trails) trails.update(dt, objects);
+  if (connections) connections.update(dt, objects);
 
   controls.update();
   renderer.render(scene, camera);

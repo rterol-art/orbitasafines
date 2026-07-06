@@ -63,3 +63,53 @@ y se activa solo: usa las listas de tags, no requiere configuración aquí.
 Al subir el par por la web de GitHub y recargar la página, el objeto aparece. No hay que regenerar nada.
 
 (Este archivo termina en .txt para que el generador lo ignore.)
+
+
+═══════════════════════════════════════════════════════
+TIPOS DE OBJETO (además del modelo 3D de arriba)
+═══════════════════════════════════════════════════════
+
+El tipo se infiere del archivo hermano, o se declara con "type".
+
+── IMAGEN (PNG, con o sin transparencia) ──────────────
+Par: retrato.png + retrato.json
+
+{
+  "tags": ["cara", "registro", "lila"],
+  "backOpacity": 0.22,
+  "movement": { "base": { "type": "bucle", "radius": 1.2 } }
+}
+
+La imagen flota como plano de dos caras: el anverso es el registro;
+el dorso es la MISMA imagen espejada y translúcida (backOpacity controla
+cuánto se transparenta el reverso, 0-1). Al rodearla se ve su copia
+fantasma desde el lado imposible.
+
+── TEXTO (sin archivo, solo JSON) ─────────────────────
+Solo: cita.json
+
+{
+  "tags": ["frase", "aura"],
+  "text": "el algoritmo intentó capturar algo\nperdió el aura por el camino",
+  "size": 0.9,
+  "color": "#d8d2e0",
+  "weight": 300,
+  "opacity": 0.9,
+  "movement": { "base": { "type": "bucle", "radius": 2.0 } }
+}
+
+El texto mira siempre a cámara pero tiembla y no se alinea del todo.
+Usa \n para saltos de línea. size = altura en unidades de escena.
+No lleva efectos de malla (costura/desgarro) — es plano.
+
+── type explícito ─────────────────────────────────────
+Si el nombre del .json no coincide con el del archivo, declara:
+  "type": "image", "file": "otro-nombre.png"
+  "type": "model", "file": "otro-nombre.glb"
+
+═══════════════════════════════════════════════════════
+EFECTOS DE ESCENA (globales, automáticos)
+═══════════════════════════════════════════════════════
+- Líneas finas que conectan elementos cercanos de forma intermitente.
+- Estela suave que dejan imágenes y textos a su paso.
+Ambos se activan solos. Se desactivan en CONFIG (main.js) si molestan.

@@ -11,7 +11,7 @@ directamente de la API pública de GitHub al abrir la página.
 index.html          la página
 js/main.js          el motor
 js/behaviors.js     los comportamientos
-objects/            las obras: pares .glb + .json
+objects/            las obras: modelos (.glb), imágenes (.png) o textos (.json)
 ```
 
 Cuatro cosas visibles. Si tu repo tiene estas cuatro cosas, funciona.
