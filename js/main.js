@@ -1,0 +1,263 @@
+// ============================================================
+// espacio — Fases 1+2
+// Escena negra + IBL + carga desde manifest + comportamientos
+// ============================================================
+
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { MovementController, TearScheduler, makeRng } from './behaviors.js';
+
+// ---------- Configuración ----------
+const CONFIG = {
+  maxObjects: 30,
+  spawnRadius: 6,
+  targetSize: 1.6,
+  envIntensity: 1.0,
+};
+
+// ---------- Escena base ----------
+const canvas = document.getElementById('scene');
+const hud = document.getElementById('hud');
+
+const renderer = new THREE.WebGLRenderer({
+  canvas, antialias: true, powerPreference: 'high-performance',
+});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+
+const camera = new THREE.PerspectiveCamera(
+  50, window.innerWidth / window.innerHeight, 0.1, 200
+);
+camera.position.set(0, 0.4, 10);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.minDistance = 1.5;
+controls.maxDistance = 40;
+
+// ---------- Iluminación ----------
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = CONFIG.envIntensity;
+pmrem.dispose();
+
+const key = new THREE.DirectionalLight(0xffffff, 0.6);
+key.position.set(3, 5, 4);
+scene.add(key);
+
+const fill = new THREE.DirectionalLight(0x8899bb, 0.15);
+fill.position.set(-2, -3, -2);
+scene.add(fill);
+
+// ---------- Loaders ----------
+const ktx2 = new KTX2Loader()
+  .setTranscoderPath('https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/libs/basis/')
+  .detectSupport(renderer);
+
+const gltfLoader = new GLTFLoader()
+  .setKTX2Loader(ktx2)
+  .setMeshoptDecoder(MeshoptDecoder);
+
+// ---------- Estado compartido de comportamientos ----------
+const objects = [];                                 // { root, meta, controller }
+const tearScheduler = new TearScheduler();          // 1 desgarro a la vez en toda la escena
+const timeUniform = { value: 0 };                   // reloj global para shaders (costura)
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// ---------- Utilidades ----------
+function setHud(text, fade = false) {
+  hud.textContent = text;
+  hud.classList.toggle('faded', fade);
+}
+
+function hashString(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function normalize(root, targetSize, userScale = 1) {
+  const box = new THREE.Box3().setFromObject(root);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  const s = (targetSize / maxDim) * userScale;
+  root.scale.setScalar(s);
+  root.position.sub(center.multiplyScalar(s));
+}
+
+function spawnPosition(index, total) {
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  const y = 1 - (index / Math.max(total - 1, 1)) * 2;
+  const r = Math.sqrt(1 - y * y);
+  const theta = golden * index;
+  return new THREE.Vector3(
+    Math.cos(theta) * r,
+    y * 0.6,
+    Math.sin(theta) * r
+  ).multiplyScalar(CONFIG.spawnRadius * (0.5 + Math.random() * 0.5));
+}
+
+function attachController(root, meta, seedKey) {
+  const controller = reducedMotion ? null : new MovementController(root, meta.movement, {
+    seed: hashString(seedKey),
+    tearScheduler,
+    timeUniform,
+  });
+  objects.push({ root, meta, controller });
+}
+
+// ---------- Carga ----------
+async function loadManifest() {
+  try {
+    const res = await fetch('./manifest.json', { cache: 'no-store' });
+    if (!res.ok) throw new Error(`manifest.json → ${res.status}`);
+    const manifest = await res.json();
+    return Array.isArray(manifest.objects) ? manifest.objects : [];
+  } catch (err) {
+    console.warn('[espacio] sin manifest legible:', err.message);
+    return [];
+  }
+}
+
+async function loadObject(meta, index, total) {
+  const gltf = await gltfLoader.loadAsync(`./objects/${meta.file}`);
+  const root = new THREE.Group();
+  root.add(gltf.scene);
+  normalize(gltf.scene, CONFIG.targetSize, meta.scale ?? 1);
+  root.position.copy(spawnPosition(index, total));
+  root.userData.meta = meta;
+  scene.add(root);
+  attachController(root, meta, meta.file);
+}
+
+// ---------- Fallback procedural ----------
+function makeBrokenMesh(seed) {
+  const geo = new THREE.IcosahedronGeometry(0.8, 3);
+  const pos = geo.attributes.position;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    const n = Math.sin(v.x * 4 + seed) * Math.cos(v.y * 3 + seed) * Math.sin(v.z * 5);
+    v.multiplyScalar(1 + n * 0.25);
+    if (Math.random() < 0.04) v.multiplyScalar(1.8);
+    pos.setXYZ(i, v.x, v.y, v.z);
+  }
+  geo.computeVertexNormals();
+  const idx = geo.index.array;
+  const holeStart = Math.floor(Math.random() * idx.length * 0.6);
+  const holeLen = Math.floor(idx.length * 0.18 / 3) * 3;
+  const kept = new Uint32Array(idx.length - holeLen);
+  kept.set(idx.slice(0, holeStart));
+  kept.set(idx.slice(holeStart + holeLen), holeStart);
+  geo.setIndex(new THREE.BufferAttribute(kept, 1));
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xb9a8c9, roughness: 0.65, metalness: 0,
+    side: THREE.DoubleSide, flatShading: true,
+  });
+  return new THREE.Mesh(geo, mat);
+}
+
+// Cada malla de prueba demuestra una combinación distinta,
+// para calibrar los comportamientos a ojo antes de subir obra real.
+const FALLBACK_MOVEMENTS = [
+  { // completo: la configuración por defecto
+    base: { type: 'bucle' }, time: { type: 'playback' },
+    layers: [{ type: 'jitter' }, { type: 'respiracion' }], mesh: [],
+  },
+  { // solo bucle imperfecto, limpio
+    base: { type: 'bucle', period: 45, radius: 1.5, mutation: 0.12 },
+    layers: [],
+  },
+  { // playback muy degradado + jitter fuerte
+    base: { type: 'bucle', period: 25 },
+    time: { type: 'playback', freezesPerMinute: 10, freezeMs: [300, 1200], rewindChance: 0.4 },
+    layers: [{ type: 'jitter', amplitude: 0.02, frequency: 18 }],
+  },
+  { // respiración protagonista + costura
+    base: { type: 'bucle', radius: 0.6, period: 70 },
+    layers: [{ type: 'respiracion', amount: 0.03, period: [5, 9] }],
+    mesh: [{ type: 'costura', coverage: 0.3, speed: 0.08 }],
+  },
+  { // desgarro (raro) sobre movimiento mínimo
+    base: { type: 'bucle', radius: 0.5, period: 90 },
+    layers: [{ type: 'jitter' }],
+    mesh: [{ type: 'desgarro', interval: [15, 40], strength: 0.3 }],
+  },
+];
+
+function spawnFallback() {
+  FALLBACK_MOVEMENTS.forEach((movement, i) => {
+    const root = new THREE.Group();
+    root.add(makeBrokenMesh(i * 7.3));
+    root.position.copy(spawnPosition(i, FALLBACK_MOVEMENTS.length));
+    scene.add(root);
+    attachController(root, { file: null, tags: ['fallback'], movement }, `fallback-${i}`);
+  });
+}
+
+// ---------- Arranque ----------
+async function init() {
+  const entries = await loadManifest();
+  const selection = entries
+    .sort(() => Math.random() - 0.5)
+    .slice(0, CONFIG.maxObjects);
+
+  if (selection.length === 0) {
+    spawnFallback();
+    setHud('0 objetos — mallas de prueba', true);
+  } else {
+    setHud(`cargando 0 / ${selection.length}`);
+    let loaded = 0;
+    const results = await Promise.allSettled(
+      selection.map((meta, i) =>
+        loadObject(meta, i, selection.length).then(() => {
+          loaded++;
+          setHud(`cargando ${loaded} / ${selection.length}`);
+        })
+      )
+    );
+    results
+      .filter(r => r.status === 'rejected')
+      .forEach(r => console.warn('[espacio] objeto no cargado:', r.reason));
+    setHud(`${objects.length} objetos`, true);
+  }
+}
+
+// ---------- Bucle ----------
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.1); // clamp: pestañas en background
+  timeUniform.value = clock.elapsedTime;
+
+  for (const o of objects) {
+    if (o.controller) o.controller.update(dt, clock.elapsedTime);
+  }
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+init();
+animate();

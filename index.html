@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>espacio</title>
+  <style>
+    :root {
+      --ink: #6b6b6b;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%; height: 100%;
+      background: #000;
+      overflow: hidden;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+    #scene { width: 100%; height: 100%; display: block; touch-action: none; }
+
+    /* HUD mínimo: una sola línea de estado, abajo a la izquierda */
+    #hud {
+      position: fixed;
+      left: 16px; bottom: 14px;
+      color: var(--ink);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      user-select: none;
+      pointer-events: none;
+      transition: opacity 1.2s ease;
+    }
+    #hud.faded { opacity: 0.25; }
+
+    @media (prefers-reduced-motion: reduce) {
+      #hud { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+  <div id="hud">cargando</div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>

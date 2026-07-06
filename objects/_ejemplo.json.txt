@@ -1,0 +1,65 @@
+Formato de metadatos por objeto — Fases 1+2
+============================================
+
+Cada obra son DOS archivos en esta carpeta, con el mismo nombre:
+
+  figura-lila.glb    ← el modelo comprimido
+  figura-lila.json   ← sus metadatos
+
+Ejemplo completo:
+
+{
+  "tags": [
+    "cuerpo", "escaneo", "pérdida", "lila", "rostro",
+    "malla-rota", "flotación", "interior", "textura", "registro"
+  ],
+  "scale": 1.0,
+  "movement": {
+    "base":   { "type": "bucle", "period": [30, 60], "radius": [0.8, 2.0], "mutation": 0.08 },
+    "time":   { "type": "playback", "freezesPerMinute": 4, "freezeMs": [200, 800], "rewindChance": 0.25 },
+    "layers": [
+      { "type": "jitter", "amplitude": 0.008, "frequency": 14, "intermittent": true },
+      { "type": "respiracion", "amount": 0.015, "period": [6, 14] }
+    ],
+    "mesh": [
+      { "type": "costura", "coverage": 0.22, "speed": 0.06, "opacity": 0.5 },
+      { "type": "desgarro", "interval": [30, 120], "duration": 0.7, "strength": 0.22 }
+    ]
+  }
+}
+
+Si "movement" se omite, el objeto usa la configuración por defecto:
+bucle + playback + jitter + respiración (sin efectos de malla).
+
+Todos los parámetros numéricos aceptan un valor fijo (0.8) o un rango
+([0.8, 2.0]) del que se elige un valor al azar — pero SIEMPRE el mismo
+para el mismo archivo (la semilla sale del nombre): cada objeto tiene
+carácter propio y estable entre visitas.
+
+Comportamientos disponibles
+---------------------------
+base / bucle          trayectoria cerrada que muta ligeramente cada vuelta.
+                      period (s/vuelta), radius, mutation (0 = bucle perfecto)
+
+time / playback       deforma el tiempo del bucle: congela y salta (o rebobina).
+                      freezesPerMinute, freezeMs [min,max], rewindChance
+
+layers / jitter       microtemblor de tracking. amplitude, frequency,
+                      intermittent (ráfagas en vez de continuo)
+
+layers / respiracion  oscilación de escala arrítmica con apneas.
+                      amount (±fracción), period [min,max]
+
+mesh / costura        el wireframe asoma por zonas que derivan.
+                      coverage (0-1), speed, opacity, color
+
+mesh / desgarro       espasmo de vértices, EVENTO RARO. Límite global:
+                      un solo objeto desgarrándose a la vez en la escena.
+                      interval [min,max] s, duration, strength
+
+Relacional (gravedad por tags + sincronización) llega en Fase 3
+y se activa solo: usa las listas de tags, no requiere configuración aquí.
+
+Al hacer push, la GitHub Action regenera manifest.json sola.
+
+(Este archivo termina en .txt para que el generador lo ignore.)
