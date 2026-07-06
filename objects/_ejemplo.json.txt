@@ -60,6 +60,6 @@ mesh / desgarro       espasmo de vértices, EVENTO RARO. Límite global:
 Relacional (gravedad por tags + sincronización) llega en Fase 3
 y se activa solo: usa las listas de tags, no requiere configuración aquí.
 
-Al hacer push, la GitHub Action regenera manifest.json sola.
+Al subir el par por la web de GitHub y recargar la página, el objeto aparece. No hay que regenerar nada.
 
 (Este archivo termina en .txt para que el generador lo ignore.)

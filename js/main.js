@@ -121,17 +121,70 @@ function attachController(root, meta, seedKey) {
   objects.push({ root, meta, controller });
 }
 
-// ---------- Carga ----------
-async function loadManifest() {
+// ---------- Catálogo de objetos ----------
+// Sin manifest, sin Action, sin archivos ocultos: el motor pregunta a la
+// API pública de GitHub qué hay en /objects/ cada vez que se abre la página.
+// Subir un par .glb + .json por la web de GitHub es todo lo que hace falta.
+
+function detectRepo() {
+  const host = location.hostname;
+  if (!host.endsWith('.github.io')) return null; // local u otro hosting
+  const owner = host.split('.')[0];
+  const seg = location.pathname.split('/').filter(Boolean);
+  // Página en /repo/... → el repo es el primer segmento;
+  // página en la raíz → "user site" (owner.github.io)
+  const repo = seg.length && !seg[0].endsWith('.html') ? seg[0] : `${owner}.github.io`;
+  return { owner, repo };
+}
+
+async function loadCatalog() {
+  const gh = detectRepo();
+
+  // 1) Producción: listar objects/ vía API de GitHub
+  if (gh) {
+    try {
+      const res = await fetch(
+        `https://api.github.com/repos/${gh.owner}/${gh.repo}/contents/objects`,
+        { headers: { Accept: 'application/vnd.github+json' } }
+      );
+      if (res.ok) {
+        const listing = await res.json();
+        const glbs = new Set(
+          listing.filter(f => f.name.endsWith('.glb')).map(f => f.name)
+        );
+        const jsons = listing.filter(f => f.name.endsWith('.json'));
+        const metas = await Promise.all(jsons.map(async f => {
+          try {
+            const meta = await (await fetch(`./objects/${f.name}`, { cache: 'no-store' })).json();
+            const glb = meta.file ?? f.name.replace(/\.json$/, '.glb');
+            if (!glbs.has(glb)) {
+              console.warn(`[espacio] ${f.name}: no existe objects/${glb}`);
+              return null;
+            }
+            return { ...meta, file: glb };
+          } catch (e) {
+            console.warn(`[espacio] ${f.name}: JSON inválido —`, e.message);
+            return null;
+          }
+        }));
+        return metas.filter(Boolean);
+      }
+      console.warn('[espacio] API de GitHub →', res.status);
+    } catch (err) {
+      console.warn('[espacio] API de GitHub no accesible:', err.message);
+    }
+  }
+
+  // 2) Desarrollo local: manifest.json opcional como respaldo
   try {
     const res = await fetch('./manifest.json', { cache: 'no-store' });
-    if (!res.ok) throw new Error(`manifest.json → ${res.status}`);
-    const manifest = await res.json();
-    return Array.isArray(manifest.objects) ? manifest.objects : [];
-  } catch (err) {
-    console.warn('[espacio] sin manifest legible:', err.message);
-    return [];
-  }
+    if (res.ok) {
+      const manifest = await res.json();
+      if (Array.isArray(manifest.objects)) return manifest.objects;
+    }
+  } catch { /* sin respaldo local: fallback procedural */ }
+
+  return [];
 }
 
 async function loadObject(meta, index, total) {
@@ -216,7 +269,7 @@ function spawnFallback() {
 
 // ---------- Arranque ----------
 async function init() {
-  const entries = await loadManifest();
+  const entries = await loadCatalog();
   const selection = entries
     .sort(() => Math.random() - 0.5)
     .slice(0, CONFIG.maxObjects);

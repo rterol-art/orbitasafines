@@ -1,59 +1,62 @@
 # espacio
 
 Espacio expositivo autónomo. Vacío negro, objetos flotantes, relaciones por tags.
-Sin servidor, sin build, sin Unity: archivos estáticos servidos por GitHub Pages.
+Archivos estáticos servidos por GitHub Pages. **Sin build, sin Actions, sin
+carpetas ocultas, sin manifest**: el motor lee el contenido de `/objects/`
+directamente de la API pública de GitHub al abrir la página.
+
+## Contenido del repositorio (esto es TODO)
+
+```
+index.html          la página
+js/main.js          el motor
+js/behaviors.js     los comportamientos
+objects/            las obras: pares .glb + .json
+```
+
+Cuatro cosas visibles. Si tu repo tiene estas cuatro cosas, funciona.
 
 ## Puesta en marcha (una sola vez)
 
-1. Crea un repositorio nuevo en GitHub (público) y sube todo el contenido de esta carpeta.
-2. En el repositorio: **Settings → Pages → Source: Deploy from a branch → Branch: main / (root)** → Save.
-3. En **Settings → Actions → General → Workflow permissions**, marca **Read and write permissions** (necesario para que la Action pueda commitear el manifest).
-4. Espera 1–2 minutos. Tu espacio está en `https://TUUSUARIO.github.io/NOMBREDELREPO/`
+1. Crea un repositorio público en GitHub.
+2. Sube `index.html` y la carpeta `js/` (con sus dos archivos) y la carpeta
+   `objects/`. Vale el botón **Add file → Upload files** de la web.
+3. **Settings → Pages → Source: Deploy from a branch → main / (root)** → Save.
+4. En 1–2 minutos: `https://TUUSUARIO.github.io/` (o `/NOMBREDELREPO/` si el
+   repo no se llama `TUUSUARIO.github.io`).
 
-Sin objetos subidos, la escena muestra mallas rotas procedurales de prueba
-para verificar que todo funciona.
+Sin objetos subidos, la escena muestra cinco mallas rotas de prueba, cada una
+con una combinación de movimiento distinta, para calibrar a ojo.
 
-## Subir una obra (flujo normal)
+## Subir una obra
 
-1. Comprime el modelo (una vez instalado `npm i -g @gltf-transform/cli`):
+1. Comprime el modelo (requiere `npm i -g @gltf-transform/cli`, una vez):
 
    ```
-   gltf-transform optimize entrada.glb figura-lila.glb --compress meshopt --texture-compress ktx2
+   gltf-transform optimize entrada.glb torito.glb --compress meshopt --texture-size 2048
    ```
 
-2. Escribe `figura-lila.json` con sus tags (formato en `objects/_ejemplo.json.txt`).
-3. Sube ambos archivos a `/objects/` — vale el botón **Add file → Upload files**
-   de la web de GitHub, desde cualquier dispositivo.
-4. La Action regenera `manifest.json` y en ~1 minuto la obra está en el espacio.
+   (KTX2 es opcional y requiere instalar el binario `ktx` aparte; no hace
+   falta para empezar.)
 
-## Estructura
-
-```
-index.html                      página única
-js/main.js                      motor (Three.js vía CDN)
-objects/                        pares .glb + .json — las obras
-manifest.json                   índice generado automáticamente. No editar a mano.
-scripts/build-manifest.mjs      generador del manifest
-.github/workflows/manifest.yml  automatización
-```
-
-## Fases
-
-- [x] **Fase 1** — escena negra, IBL, carga desde manifest, cap de rendimiento, fallback procedural
-- [x] **Fase 2** — comportamientos declarativos: bucle imperfecto, playback degradado, jitter, respiración arrítmica, desgarro (evento raro, cap global), costura wireframe
-- [ ] **Fase 3** — sistema de fuerzas por solapamiento de tags (grafo semántico 3D)
-- [ ] **Fase 4** — pipeline de compresión automática + cap adaptativo
-- [ ] **Fase 5** — buscador por frase (diccionario)
+2. Crea `torito.json` con el mismo nombre base (formato: `objects/_ejemplo.json.txt`).
+3. Sube ambos a `/objects/` por la web de GitHub.
+4. Recarga la página. Ya está. No hay paso 5.
 
 ## Probar en local
 
-Cualquier servidor estático sobre la carpeta:
-
 ```
 npx serve .
-# o
-python3 -m http.server 8000
 ```
 
-(Abrir `index.html` directamente con doble clic no funciona: `fetch` del
-manifest necesita protocolo http.)
+En local no hay API de GitHub que consultar, así que verás las mallas de
+prueba (o puedes crear un `manifest.json` a mano con formato
+`{"objects":[{"file":"torito.glb","tags":[...]}]}` como respaldo local).
+
+## Fases
+
+- [x] **Fase 1** — escena negra, IBL, catálogo en vivo vía API de GitHub, fallback procedural
+- [x] **Fase 2** — comportamientos declarativos: bucle imperfecto, playback degradado, jitter, respiración arrítmica, desgarro (evento raro, cap global), costura wireframe
+- [ ] **Fase 3** — fuerzas por solapamiento de tags + sincronización (Kuramoto)
+- [ ] **Fase 4** — pipeline de compresión + cap adaptativo de rendimiento
+- [ ] **Fase 5** — buscador por frase (diccionario)
