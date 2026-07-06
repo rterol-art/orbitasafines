@@ -9,6 +9,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MovementController, TearScheduler, makeRng } from './behaviors.js';
 
 // ---------- Configuración ----------
@@ -146,7 +147,11 @@ async function loadObject(meta, index, total) {
 
 // ---------- Fallback procedural ----------
 function makeBrokenMesh(seed) {
-  const geo = new THREE.IcosahedronGeometry(0.8, 3);
+  // IcosahedronGeometry viene SIN índice (geometría no indexada). Para poder
+  // abrir un hueco borrando triángulos necesitamos indexarla primero;
+  // mergeVertices además fusiona vértices coincidentes → la malla se rompe
+  // por costuras reales, no por triángulos sueltos.
+  const geo = mergeVertices(new THREE.IcosahedronGeometry(0.8, 3));
   const pos = geo.attributes.position;
   const v = new THREE.Vector3();
   for (let i = 0; i < pos.count; i++) {
