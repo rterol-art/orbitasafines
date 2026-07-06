@@ -1,5 +1,11 @@
 {
-  "generated": "2026-07-06T12:29:04.449Z",
-  "count": 0,
-  "objects": []
+  "count": 1,
+  "objects": [
+    {
+      "file": "torito-ok.glb",
+      "tags": ["toro","torito","perú","cerámica","escultura","protección","tejado","casa","suerte","tradición"],
+      "movement": { "base": {"type":"bucle"}, "time":{"type":"playback"}, "layers":[{"type":"jitter"},{"type":"respiracion"}], "mesh":[{"type":"costura"},{"type":"desgarro"}] },
+      "scale": 1.0
+    }
+  ]
 }
