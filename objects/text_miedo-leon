@@ -1,0 +1,12 @@
+{
+  "tags": ["miedo", "león", "riesgo"],
+  "text": "Todo el mundo debería tener miedo\ncuando va en busca de un león.",
+  "size": 0.7,
+  "color": "#c9bfd6",
+  "weight": 300,
+  "opacity": 0.85,
+  "movement": {
+    "base": { "type": "bucle", "period": [50, 80], "radius": [1.5, 2.5], "mutation": 0.05 },
+    "layers": [{ "type": "jitter", "amplitude": 0.004 }]
+  }
+}
