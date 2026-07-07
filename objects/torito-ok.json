@@ -3,6 +3,15 @@
     "toro", "torito", "perú", "cerámica", "escultura",
     "protección", "tejado", "casa", "suerte", "tradición"
   ],
+  "expand": [
+  "astado", "bóvido", "becerro", "novillo", "animal", "figura taurina",
+  "andino", "peruano", "andes", "altiplano", "puno", "cusco", "quechua", "aymara",
+  "barro", "arcilla", "terracota", "alfarería", "artesanía", "estatuilla", "adorno", "pieza", "modelado",
+  "amuleto", "talismán", "resguardo", "bendición", "defensa", "cuidado", "amparo", "auspicio",
+  "techo", "cubierta", "cumbrera", "azotea", "hogar", "vivienda", "morada", "domicilio", "residencia",
+  "fortuna", "prosperidad", "abundancia", "dicha", "buen augurio",
+  "folclore", "cultura", "costumbre", "rito", "creencia", "artesanal", "patrimonio"
+]
   "scale": 1.0,
   "movement": {
     "base":   { "type": "bucle", "period": [30, 60], "radius": [0.8, 2.0], "mutation": 0.08 },
