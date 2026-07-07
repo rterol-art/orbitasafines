@@ -11,7 +11,7 @@
   "techo", "cubierta", "cumbrera", "azotea", "hogar", "vivienda", "morada", "domicilio", "residencia",
   "fortuna", "prosperidad", "abundancia", "dicha", "buen augurio",
   "folclore", "cultura", "costumbre", "rito", "creencia", "artesanal", "patrimonio"
-]
+],
   "scale": 1.0,
   "movement": {
     "base":   { "type": "bucle", "period": [30, 60], "radius": [0.8, 2.0], "mutation": 0.08 },
