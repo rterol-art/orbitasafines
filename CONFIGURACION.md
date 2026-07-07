@@ -292,3 +292,69 @@ rastro. Para destacar un objeto principal:
 El texto ya no se cizalla (la inclinación bajó de 0.05 a 0.012 rad): vibra en
 torno al texto nítido, permanece legible. Y su opacidad baja cuando tiene poca
 relación con el entorno (`minOpacity`, def. 0.35), sube cuando resuena.
+
+---
+
+## AMPLIACIÓN Fase 3c (ajustes)
+
+### Órbita alrededor de otro objeto (automática)
+
+Un objeto muy afín a otro (afinidad > 0.5) deja de orbitar su propio centro y
+pasa a girar ALREDEDOR del otro — el satélite del par (el de menor relación
+total) orbita al ancla. Mantiene distancia mínima (no colapsa) y el offset
+rota lento (órbita viva, no estática). Cada choque durante la órbita reduce la
+mutación (memoria del contacto). Emerge solo de los tags; no se configura.
+
+### Escala
+
+Aleatoria por objeto (semilla del nombre, 0.75–1.35) MÁS un extra por afinidad
+(hasta +30% con relación máxima). Los objetos muy conectados son algo mayores.
+
+### Period (tempo)
+
+Modulado por relación: mucha relación con el entorno → bucle más LENTO (se
+asienta, gravita); poca → más rápido y ligero. Sobre el `period` que definas.
+
+### Choques
+
+Cuando dos objetos se acercan por debajo de la distancia mínima: ambos suben
+el jitter a ~0.03 durante el impacto (decae solo) y su bucle pierde un 3% de
+mutación (se asientan un poco más con cada golpe). Histéresis para no
+redispararse mientras siguen solapados.
+
+### Vibración por proximidad — sólo caras orientadas al vecino
+
+Las olas (afín) o pinchos (hostil) aparecen SÓLO en las caras del modelo
+orientadas hacia el objeto que provoca el efecto, con un ligero random. El
+resto de la superficie queda quieta. La reacción tiene dirección.
+
+### Texto — ajustes
+
+- Permanece NÍTIDO: inclinación mínima (0.006 rad), jitter capado a 0.004.
+  La vibración perceptible es su leve deriva, no la deformación del plano.
+- Opacidad por relación: si no resuena con tags cercanos, baja a ~0.45;
+  con resonancia, sube a 0.9. Además resalta en negrita las palabras que
+  coinciden.
+
+### Estela — ampliada
+
+Vida más larga (1.9s), muestreo más denso, huella de 3D más presente
+(printOpacity 0.20) y disco algo mayor. Por objeto: `"trailStrength": 2`
+en el JSON multiplica la intensidad de su estela (para el objeto principal).
+
+---
+
+## CORRECCIONES v9
+
+- **Líneas eternas (bug)**: las líneas de conexión ahora mueren si un extremo
+  sale de escena, y se limpian por completo al buscar/aleatorizar. Además su
+  opacidad máx bajó de 0.5 a 0.22 (más sutiles) y se eliminó el enlace por
+  proximidad (unía textos vecinos de forma persistente); ahora solo conectan
+  por afinidad de tags.
+- **Texto legible**: el texto ya no recibe jitter agresivo ni respiración.
+  Su movimiento propio es sólo deriva lenta por bucle amplio + micro-jitter
+  de 0.002. Ya no hay que tocar nada por bloque: es global.
+- **Botón "azar"**: junto al buscador, restaura una constelación aleatoria.
+  El buscador vacío + Enter hace lo mismo.
+- **Círculo de carga**: un disco difuminado pulsante aparece en el centro
+  mientras cargan los modelos, anticipando su aparición.

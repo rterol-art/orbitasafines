@@ -182,12 +182,14 @@ const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
 export function updateBillboard(group, camera, t, seed) {
   group.quaternion.copy(camera.quaternion);
-  // Inclinación residual muy pequeña (antes 0.05 rad cizallaba el texto).
-  const tilt = 0.012;
-  const rx = Math.sin(t * 0.5 + seed) * tilt;
-  const ry = Math.cos(t * 0.4 + seed * 1.3) * tilt;
-  const rz = Math.sin(t * 0.25 + seed * 0.7) * tilt * 0.5;
-  _e.set(rx, ry, rz);
+  // Inclinación residual mínima: el texto debe permanecer NÍTIDO y legible.
+  // Una micro-oscilación lenta alrededor del frontal, sin componente rápida
+  // que cizalle o rompa la lectura. La vibración perceptible del texto es su
+  // ligera deriva de posición (jitter suave), no la deformación del plano.
+  const tilt = 0.006;
+  const rx = Math.sin(t * 0.35 + seed) * tilt;
+  const ry = Math.cos(t * 0.28 + seed * 1.3) * tilt;
+  _e.set(rx, ry, 0);
   _q.setFromEuler(_e);
   group.quaternion.multiply(_q);
 }
@@ -235,11 +237,15 @@ export class ConnectionLines {
     // Envejecer y actualizar posiciones de las activas
     for (const slot of this.lines) {
       if (!slot.a) continue;
+      // si alguno de los extremos ya no está en escena, matar la línea
+      if (!slot.a.parent || !slot.b.parent) {
+        slot.a = slot.b = null; slot.line.visible = false; continue;
+      }
       slot.age += dt;
       const p = slot.age / slot.life;
       if (p >= 1) { slot.a = slot.b = null; slot.line.visible = false; continue; }
-      // Envolvente: entra y sale suave (seno)
-      slot.line.material.opacity = Math.sin(p * Math.PI) * 0.5;
+      // Envolvente suave, alfa máx reducido (antes 0.5 → líneas demasiado presentes)
+      slot.line.material.opacity = Math.sin(p * Math.PI) * 0.22;
       const arr = slot.line.geometry.attributes.position.array;
       slot.a.getWorldPosition(_tmpA);
       slot.b.getWorldPosition(_tmpB);
@@ -256,45 +262,37 @@ export class ConnectionLines {
   }
 
   _trySpawn(objects) {
+    // Solo conectamos por AFINIDAD de tags. Sin pares afines, no hay líneas
+    // (el fallback de proximidad tendía a unir textos vecinos permanentemente).
+    if (!this.pairs || !this.pairs.length) return;
     const free = this.lines.find(s => !s.a);
     if (!free) return;
-
-    // Si hay pares por afinidad (Fase 3), elegir de ahí ponderando por peso;
-    // si no, caer a proximidad espacial (Fase 2).
-    if (this.pairs && this.pairs.length) {
-      // ruleta ponderada por afinidad
-      let total = 0;
-      for (const p of this.pairs) total += p.w;
-      let r = Math.random() * total;
-      let chosen = this.pairs[0];
-      for (const p of this.pairs) { r -= p.w; if (r <= 0) { chosen = p; break; } }
-      free.a = chosen.a; free.b = chosen.b;
-      free.age = 0;
-      free.life = this.life[0] + Math.random() * (this.life[1] - this.life[0]);
-      free.line.visible = true;
-      return;
-    }
-
-    // Fallback proximidad
-    const i = Math.floor(Math.random() * objects.length);
-    let best = null, bestD = this.maxDist;
-    objects[i].root.getWorldPosition(_tmpA);
-    for (let k = 0; k < objects.length; k++) {
-      if (k === i) continue;
-      objects[k].root.getWorldPosition(_tmpB);
-      const d = _tmpA.distanceTo(_tmpB);
-      if (d < bestD) { bestD = d; best = objects[k]; }
-    }
-    if (!best) return;
-    free.a = objects[i].root;
-    free.b = best.root;
+    // ruleta ponderada por afinidad
+    let total = 0;
+    for (const p of this.pairs) total += p.w;
+    let r = Math.random() * total;
+    let chosen = this.pairs[0];
+    for (const p of this.pairs) { r -= p.w; if (r <= 0) { chosen = p; break; } }
+    // no conectar si algún extremo ya no está en escena
+    if (!chosen.a.parent || !chosen.b.parent) return;
+    free.a = chosen.a; free.b = chosen.b;
     free.age = 0;
     free.life = this.life[0] + Math.random() * (this.life[1] - this.life[0]);
     free.line.visible = true;
   }
 
-  // Fase 3 inyecta aquí los pares relacionados por tags.
   setPairs(pairs) { this.pairs = pairs; }
+
+  // Soltar todas las líneas activas y limpiar pares (al reconstruir escena).
+  reset() {
+    for (const slot of this.lines) {
+      slot.a = slot.b = null;
+      slot.age = 0;
+      slot.line.visible = false;
+      slot.line.material.opacity = 0;
+    }
+    this.pairs = null;
+  }
 }
 const _tmpA = new THREE.Vector3();
 const _tmpB = new THREE.Vector3();
@@ -307,10 +305,10 @@ const _tmpB = new THREE.Vector3();
 export class Trails {
   constructor(scene, opts = {}) {
     this.scene = scene;
-    this.every = opts.every ?? 0.18;      // s entre muestras
-    this.life = opts.life ?? 1.4;         // vida de cada eco
+    this.every = opts.every ?? 0.14;      // s entre muestras (algo más denso)
+    this.life = opts.life ?? 1.9;         // vida de cada eco (más larga → estela más visible)
     this.maxOpacity = opts.maxOpacity ?? 0.16;
-    this.printOpacity = opts.printOpacity ?? 0.14; // huella de 3D (antes 0.07, muy sutil)
+    this.printOpacity = opts.printOpacity ?? 0.20; // huella de 3D más presente
     this.samples = [];                    // { mesh, age, base }
     this._acc = 0;
     this._softTex = makeSoftDiscTexture(); // gradiente radial compartido
@@ -388,10 +386,19 @@ export class Trails {
     }));
     root.getWorldPosition(echo.position);
     const r = cache.radius * (root.scale.x || 1);
-    echo.scale.setScalar(r * 2);
+    echo.scale.setScalar(r * 2.4); // algo mayor que la silueta → estela más legible
     if (camera) echo.quaternion.copy(camera.quaternion);
     this.scene.add(echo);
     this.samples.push({ mesh: echo, age: 0, base: op, billboard: true });
+  }
+
+  // Eliminar todos los ecos vivos (al reconstruir la escena).
+  clear() {
+    for (const s of this.samples) {
+      this.scene.remove(s.mesh);
+      s.mesh.material.dispose();
+    }
+    this.samples.length = 0;
   }
 }
 const _qTrail = new THREE.Quaternion();

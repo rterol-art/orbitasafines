@@ -94,11 +94,49 @@ export class RelationField {
       this.nodes[i].totalRel = sum;
     }
     this._applyRelationModulation();
+    this._assignOrbits(opts.orbitThreshold ?? 0.5);
 
     this._f = new THREE.Vector3();
     this._d = new THREE.Vector3();
     this._pt = new THREE.Vector3();
     this._colliding = new Set();
+  }
+
+  // Algunos objetos orbitan a OTRO objeto en vez de a un punto fijo: los que
+  // declaran orbitAround, o los de afinidad muy alta con un vecino. Su hogar
+  // deja de ser fijo y pasa a ser un offset respecto a la posición viva del
+  // objetivo. Mantiene una distancia mínima (no colapsan sobre el objetivo).
+  _assignOrbits(threshold) {
+    const n = this.nodes.length;
+    // primero, el vecino de máxima afinidad de cada nodo
+    for (let i = 0; i < n; i++) {
+      const ni = this.nodes[i];
+      let target = -1, best = threshold;
+      for (let j = 0; j < n; j++) {
+        if (i === j) continue;
+        if (this.aff[i][j] > best) { best = this.aff[i][j]; target = j; }
+      }
+      ni._bestNeighbor = target;
+    }
+    // asignar órbita: un nodo orbita a su mejor vecino SÓLO si es el
+    // "satélite" del par — el de menor relación total. Así, de dos objetos
+    // mutuamente afines, uno ancla y el otro gira alrededor; nunca ambos.
+    for (let i = 0; i < n; i++) {
+      const ni = this.nodes[i];
+      const t = ni._bestNeighbor;
+      if (t < 0) { ni._orbitTarget = -1; continue; }
+      const nt = this.nodes[t];
+      const mutual = nt._bestNeighbor === i;
+      // si es mutuo, orbita sólo el de menor totalRel (desempate por índice)
+      const iAmSatellite = !mutual
+        || ni.totalRel < nt.totalRel
+        || (ni.totalRel === nt.totalRel && i > t);
+      if (!iAmSatellite) { ni._orbitTarget = -1; continue; }
+      ni._orbitTarget = t;
+      ni._orbitOffset = ni.anchor.clone().sub(nt.anchor);
+      const minOrbit = this.minOrbit ?? 1.8;
+      if (ni._orbitOffset.length() < minOrbit) ni._orbitOffset.setLength(minOrbit);
+    }
   }
 
   // Devuelve las parejas con afinidad > umbral, para las líneas de conexión.
@@ -144,9 +182,22 @@ export class RelationField {
         }
       }
 
+      // Los nodos en órbita: su hogar sigue al objetivo (offset que rota
+      // lentamente para que la órbita no sea estática). El resorte homePull
+      // los mantiene a distancia orbital del otro objeto.
+      if (ni._orbitTarget >= 0) {
+        const nt = this.nodes[ni._orbitTarget];
+        // rotar el offset lentamente alrededor del eje Y → órbita viva
+        const ang = h * 0.25;
+        const ox = ni._orbitOffset.x, oz = ni._orbitOffset.z;
+        ni._orbitOffset.x = ox * Math.cos(ang) - oz * Math.sin(ang);
+        ni._orbitOffset.z = ox * Math.sin(ang) + oz * Math.cos(ang);
+        ni.home.copy(nt.anchor).add(ni._orbitOffset);
+      }
+
       // Resorte suave de regreso al hogar (evita fuga del encuadre)
       this._d.subVectors(ni.home, ni.anchor);
-      this._f.addScaledVector(this._d, this.homePull);
+      this._f.addScaledVector(this._d, this.homePull * (ni._orbitTarget >= 0 ? 2.5 : 1));
 
       if (this._f.length() > this.maxForce) this._f.setLength(this.maxForce);
       ni.vel.addScaledVector(this._f, h);

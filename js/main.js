@@ -236,6 +236,15 @@ async function loadObject(meta, index, total) {
     root = await buildImage(`./objects/${meta.file}`, meta);
   } else if (meta.type === 'text') {
     root = buildText(meta);
+    // El texto necesita un movimiento propio, MUY suave: sólo deriva por bucle
+    // amplio y lento, sin jitter perceptible, sin respiración (no tiene volumen)
+    // ni efectos de malla. Así permanece legible. Si el JSON define movement,
+    // se respeta su base pero se neutralizan las capas agresivas.
+    const userBase = meta.movement?.base ?? { type: 'bucle', period: [60, 90], radius: [1.5, 2.5], mutation: 0.04 };
+    meta = { ...meta, movement: {
+      base: userBase,
+      layers: [{ type: 'jitter', amplitude: 0.002, frequency: 6, intermittent: false }],
+    }};
   } else { // model
     const gltf = await gltfLoader.loadAsync(`./objects/${meta.file}`);
     root = new THREE.Group();
@@ -342,12 +351,16 @@ function clearScene() {
   }
   objects.length = 0;
   if (relations) relations = null;
-  // limpiar líneas y estelas activas
-  if (connections) connections.setPairs(null);
+  // Reset duro de líneas: soltar toda línea activa (si no, quedan congeladas
+  // apuntando a objetos ya retirados → líneas eternas) y limpiar los pares.
+  if (connections) connections.reset();
+  if (trails) trails.clear();
 }
 
 async function populate(selection) {
   clearScene();
+  const loader = document.getElementById('loader');
+  if (loader) loader.classList.add('on');
   if (selection.length === 0) {
     spawnFallback();
     setHud('sin resultados — muestra de prueba', true);
@@ -367,6 +380,7 @@ async function populate(selection) {
       .forEach(r => console.warn('[espacio] objeto no cargado:', r.reason));
     setHud(`${objects.length} objetos`, true);
   }
+  if (loader) loader.classList.remove('on');
 
   // Efectos de escena
   if (!reducedMotion) {
@@ -389,17 +403,20 @@ async function init() {
   if (CONFIG.search) setupSearch();
 }
 
-// ---------- Buscador ----------
+// ---------- Buscador y azar ----------
+function randomize() {
+  return populate([...catalog].sort(() => Math.random() - 0.5).slice(0, CONFIG.maxObjects));
+}
+
 function setupSearch() {
   const input = document.getElementById('search');
+  const randomBtn = document.getElementById('random');
+  if (randomBtn) randomBtn.addEventListener('click', () => { if (input) input.value = ''; randomize(); });
   if (!input) return;
   input.addEventListener('keydown', async (e) => {
     if (e.key !== 'Enter') return;
     const phrase = input.value.trim();
-    if (!phrase) { // vacío → muestra aleatoria
-      await populate([...catalog].sort(() => Math.random() - 0.5).slice(0, CONFIG.maxObjects));
-      return;
-    }
+    if (!phrase) { await randomize(); return; }
     const res = search(phrase, catalog, { max: CONFIG.maxObjects, fallback: CONFIG.searchFallback });
     await populate(res.objects);
     if (res.mode === 'fallback') setHud('nada respondió a esa frase', true);
@@ -435,6 +452,12 @@ function updateTextHighlights() {
     // relación 0..1 = palabras resonantes / total de palabras del texto
     const ratio = words.size ? bold.size / words.size : 0;
     o.root.userData._relRatio = ratio;
+    // Poca relación → el texto se atenúa hacia 0.4; con resonancia → 0.9.
+    const plane = o.root.userData.textPlane;
+    if (plane) {
+      const target = bold.size > 0 ? 0.9 : 0.45;
+      plane.material.opacity += (target - plane.material.opacity) * 0.12;
+    }
   }
 }
 
