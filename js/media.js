@@ -316,9 +316,9 @@ export class Trails {
   constructor(scene, opts = {}) {
     this.scene = scene;
     this.every = opts.every ?? 0.14;      // s entre muestras (algo más denso)
-    this.life = opts.life ?? 1.9;         // vida de cada eco (más larga → estela más visible)
-    this.maxOpacity = opts.maxOpacity ?? 0.16;
-    this.printOpacity = opts.printOpacity ?? 0.20; // huella de 3D más presente
+    this.life = opts.life ?? 1.0;         // vida de cada eco (más larga → estela más visible)
+    this.maxOpacity = opts.maxOpacity ?? 0.05;
+    this.printOpacity = opts.printOpacity ?? 0.15; // huella de 3D más presente
     this.samples = [];                    // { mesh, age, base }
     this._acc = 0;
     this._softTex = makeSoftDiscTexture(); // gradiente radial compartido
