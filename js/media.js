@@ -186,9 +186,9 @@ export function updateBillboard(group, camera, t, seed) {
   // Una micro-oscilación lenta alrededor del frontal, sin componente rápida
   // que cizalle o rompa la lectura. La vibración perceptible del texto es su
   // ligera deriva de posición (jitter suave), no la deformación del plano.
-  const tilt = 0.006;
-  const rx = Math.sin(t * 0.35 + seed) * tilt;
-  const ry = Math.cos(t * 0.28 + seed * 1.3) * tilt;
+  const tilt = 0.003;
+  const rx = Math.sin(t * 0.17 + seed) * tilt;
+  const ry = Math.cos(t * 0.14 + seed * 1.3) * tilt;
   _e.set(rx, ry, 0);
   _q.setFromEuler(_e);
   group.quaternion.multiply(_q);
