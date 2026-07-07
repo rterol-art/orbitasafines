@@ -143,20 +143,113 @@ class Jitter {
 // irregular, con apneas. Lo que queda de un cuerpo.
 // NUNCA un seno puro: la arritmia es lo que la salva del cliché.
 // ============================================================
+// ============================================================
+// CAPA — respiración residual (hinchamiento localizado por shader)
+// Rediseñada: en vez de escalar todo el objeto (que se leía como un bulto
+// hinchándose sin sentido), unas ZONAS del modelo se hinchan y deshinchan
+// lentamente, y donde más se estiran la textura CEDE y asoma la malla —
+// como un registro que da de sí y empieza a perderse por tensión.
+// El hinchamiento es el momento en que la superficie revela su estructura.
+// ============================================================
 class Respiracion {
-  constructor(cfg, rng) {
-    this.amount = pick(cfg.amount ?? 0.015, rng);   // ±1.5% de escala
+  constructor(cfg, rng, meshes, timeUniform) {
+    this.amount = pick(cfg.amount ?? 0.06, rng);    // desplazamiento máx de la zona
     this.baseSpeed = (Math.PI * 2) / pick(cfg.period ?? [6, 14], rng);
     this.seed = rng() * 100;
-    this.phase = rng() * Math.PI * 2;               // Fase 3: Kuramoto sincroniza esto
+    this.phase = rng() * Math.PI * 2;               // Kuramoto sincroniza esto
+    this.zones = cfg.zones ?? 2.5;                  // "frecuencia espacial" de las zonas
+    this.reveal = cfg.reveal ?? true;               // ¿asoma la malla al estirarse?
+    this.uniforms = {
+      uBreath: { value: 0 },        // -1..1, cuánto hinchado ahora mismo
+      uBreathAmt: { value: this.amount },
+      uBreathZones: { value: this.zones },
+      uBreathSeed: { value: this.seed },
+    };
+    this.wireMeshes = [];
+    for (const m of meshes) {
+      injectBreath(m.material, this.uniforms);
+      if (this.reveal) this._addWireReveal(m);
+    }
   }
+
+  // Añade un wireframe que solo aparece donde la zona se hincha.
+  _addWireReveal(mesh) {
+    const mat = new THREE.MeshBasicMaterial({
+      wireframe: true, transparent: true, color: 0xcfc7dd,
+      opacity: 0, depthWrite: false,
+    });
+    injectBreathWire(mat, this.uniforms);
+    const wire = new THREE.Mesh(mesh.geometry, mat);
+    wire.renderOrder = 1;
+    mesh.add(wire);
+    this.wireMeshes.push(wire);
+  }
+
+  // Llamado cada frame; devuelve 1 (ya no escala el grupo, el shader hace todo)
   scale(t, dt) {
-    // velocidad modulada por ruido lento; bajo umbral → apnea
     const mod = noise1(t * 0.1, this.seed);
-    const speed = mod < 0.22 ? 0 : this.baseSpeed * (0.5 + mod);
+    const speed = mod < 0.22 ? 0 : this.baseSpeed * (0.5 + mod); // apneas
     this.phase += speed * dt;
-    return 1 + Math.sin(this.phase) * this.amount;
+    this.uniforms.uBreath.value = Math.sin(this.phase);
+    return 1; // el grupo ya no cambia de escala
   }
+}
+
+// Shader: desplaza vértices por zonas según uBreath. Las zonas salen de una
+// función de ruido sobre la posición local → mismas zonas siempre, se hinchan
+// juntas. Along normal, para que el volumen crezca hacia afuera.
+function injectBreath(material, uniforms) {
+  const prev = material.onBeforeCompile;
+  material.onBeforeCompile = (shader) => {
+    if (prev) prev(shader);
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        uniform float uBreath; uniform float uBreathAmt;
+        uniform float uBreathZones; uniform float uBreathSeed;
+        float breathZone(vec3 p) {
+          return 0.5 + 0.5 * sin(p.x * uBreathZones + uBreathSeed)
+                     * sin(p.y * uBreathZones * 0.9 + uBreathSeed * 1.3)
+                     * sin(p.z * uBreathZones * 1.1 + uBreathSeed * 0.7);
+        }`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        {
+          float bz = breathZone(position);
+          float swell = bz * uBreath * uBreathAmt;
+          transformed += normalize(objectNormal) * swell;
+        }`);
+  };
+  material.needsUpdate = true;
+}
+
+// Wireframe que aparece proporcional a cuánto se estira la zona: donde el
+// hinchamiento es mayor, la textura "cede" y se ve la malla.
+function injectBreathWire(material, uniforms) {
+  material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        uniform float uBreath; uniform float uBreathAmt;
+        uniform float uBreathZones; uniform float uBreathSeed;
+        varying float vStretch;
+        float breathZoneW(vec3 p) {
+          return 0.5 + 0.5 * sin(p.x * uBreathZones + uBreathSeed)
+                     * sin(p.y * uBreathZones * 0.9 + uBreathSeed * 1.3)
+                     * sin(p.z * uBreathZones * 1.1 + uBreathSeed * 0.7);
+        }`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        {
+          float bz = breathZoneW(position);
+          float swell = bz * uBreath * uBreathAmt;
+          transformed += normalize(objectNormal) * swell;
+          vStretch = clamp(bz * max(uBreath, 0.0), 0.0, 1.0);
+        }`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vStretch;')
+      .replace('#include <dithering_fragment>', `#include <dithering_fragment>
+        gl_FragColor.a *= smoothstep(0.35, 0.7, vStretch) * 0.6;`);
+  };
+  material.needsUpdate = true;
 }
 
 // ============================================================
@@ -254,7 +347,55 @@ function injectTear(material, uniforms) {
 }
 
 // ============================================================
-// MALLA — costura visible (wireframe por zonas)
+// MALLA — deshielo (shader, degradación permanente)
+// Reemplaza al desgarro. En vez de un espasmo que actúa de roto, un
+// desplazamiento lentísimo y ACUMULATIVO de los vértices a lo largo de su
+// normal: el modelo se deshace despacio mientras existe en la escena y
+// nunca se recupera. No teatraliza el daño — lo continúa. La copia fallida
+// que sigue fallando, el error como proceso en tiempo real.
+// ============================================================
+class Deshielo {
+  constructor(cfg, rng, meshes) {
+    this.rate = pick(cfg.rate ?? 0.012, rng);   // avance del deshielo por segundo
+    this.max = pick(cfg.max ?? 0.35, rng);      // desplazamiento máximo (se detiene ahí)
+    this.turbulence = cfg.turbulence ?? 0.6;    // cuánto varía entre zonas
+    this.uniforms = {
+      uMelt: { value: 0 },
+      uMeltMax: { value: this.max },
+      uMeltTurb: { value: this.turbulence },
+      uMeltSeed: { value: rng() * 100 },
+    };
+    for (const m of meshes) injectMelt(m.material, this.uniforms);
+  }
+  update(dt) {
+    // avanza monótono hasta el tope; no baja nunca
+    if (this.uniforms.uMelt.value < 1) {
+      this.uniforms.uMelt.value = Math.min(1, this.uniforms.uMelt.value + this.rate * dt);
+    }
+  }
+}
+
+function injectMelt(material, uniforms) {
+  const prev = material.onBeforeCompile;
+  material.onBeforeCompile = (shader) => {
+    if (prev) prev(shader);
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        uniform float uMelt; uniform float uMeltMax;
+        uniform float uMeltTurb; uniform float uMeltSeed;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        {
+          // desplazamiento por zonas: unas se deshacen más que otras
+          float zM = 0.5 + 0.5 * sin(dot(position, vec3(8.3, 5.1, 6.7)) + uMeltSeed);
+          float amtM = uMelt * uMeltMax * mix(1.0 - uMeltTurb, 1.0, zM);
+          transformed += normalize(objectNormal) * amtM;
+        }`);
+  };
+  material.needsUpdate = true;
+}
+
+
 // La estructura interna asoma y desaparece por regiones que
 // derivan lentamente. El interior como territorio.
 // ============================================================
@@ -304,6 +445,60 @@ function injectCostura(material, timeUniform, coverage, speed, seed) {
 }
 
 // ============================================================
+// MALLA — vibración por proximidad (shader, dirigida por relaciones)
+// Cuando otro objeto se acerca, la superficie reacciona según la afinidad:
+//  - afinidad ALTA → ondulación suave, como olas (reconocimiento).
+//  - afinidad NEGATIVA → vibración violenta con pinchos (rechazo).
+// El RelationField escribe uProxNear y uProxAffinity cada frame.
+// ============================================================
+class Proximity {
+  constructor(cfg, rng, meshes) {
+    this.uniforms = {
+      uProxTime: { value: 0 },
+      uProxNear: { value: 0 },       // 0..1 cuán cerca está el vecino relevante
+      uProxAffinity: { value: 0 },   // -1..1 afinidad con ese vecino
+      uProxWave: { value: pick(cfg.wave ?? 0.04, rng) },   // amplitud onda (afín)
+      uProxSpike: { value: pick(cfg.spike ?? 0.12, rng) }, // amplitud pincho (rechazo)
+      uProxSeed: { value: rng() * 100 },
+    };
+    for (const m of meshes) injectProximity(m.material, this.uniforms);
+  }
+  update(dt) { this.uniforms.uProxTime.value += dt; }
+  set(near, affinity) {
+    this.uniforms.uProxNear.value = near;
+    this.uniforms.uProxAffinity.value = affinity;
+  }
+}
+
+function injectProximity(material, uniforms) {
+  const prev = material.onBeforeCompile;
+  material.onBeforeCompile = (shader) => {
+    if (prev) prev(shader);
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        uniform float uProxTime; uniform float uProxNear; uniform float uProxAffinity;
+        uniform float uProxWave; uniform float uProxSpike; uniform float uProxSeed;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        {
+          float near = uProxNear;
+          if (near > 0.001) {
+            if (uProxAffinity >= 0.0) {
+              float w = sin(position.y * 6.0 + uProxTime * 3.0 + uProxSeed)
+                      * sin(position.x * 4.0 - uProxTime * 2.0);
+              transformed += normalize(objectNormal) * w * uProxWave * near * uProxAffinity;
+            } else {
+              float s = sin(dot(position, vec3(23.1, 31.7, 19.3)) + uProxTime * 18.0 + uProxSeed);
+              s = pow(abs(s), 6.0) * sign(s);
+              transformed += normalize(objectNormal) * s * uProxSpike * near * (-uProxAffinity);
+            }
+          }
+        }`);
+  };
+  material.needsUpdate = true;
+}
+
+// ============================================================
 // CONTROLADOR — compone todo por objeto
 // ============================================================
 export class MovementController {
@@ -317,19 +512,32 @@ export class MovementController {
     this.base = cfg.base?.type === 'bucle'
       ? new BucleImperfecto(cfg.base, rng, root.position) : null;
 
+    // Recoger meshes antes: la respiración (ahora por shader) los necesita
+    const meshes = [];
+    root.traverse(o => { if (o.isMesh) meshes.push(o); });
+
     this.jitter = null; this.resp = null;
     for (const layer of cfg.layers ?? []) {
       if (layer.type === 'jitter') this.jitter = new Jitter(layer, rng);
-      if (layer.type === 'respiracion') this.resp = new Respiracion(layer, rng);
+      if (layer.type === 'respiracion') {
+        this.resp = new Respiracion(layer, rng, meshes, opts.timeUniform);
+      }
     }
 
     this.meshFx = [];
-    const meshes = [];
-    root.traverse(o => { if (o.isMesh) meshes.push(o); });
+    this.proximity = null;
     if (meshes.length) {
       for (const fx of cfg.mesh ?? []) {
         if (fx.type === 'desgarro') this.meshFx.push(new Desgarro(fx, rng, meshes, opts.tearScheduler));
+        if (fx.type === 'deshielo') this.meshFx.push(new Deshielo(fx, rng, meshes));
         if (fx.type === 'costura') new Costura(fx, rng, meshes, opts.timeUniform);
+      }
+      // Vibración por proximidad: activa por defecto en modelos (la dirige
+      // el RelationField). Se desactiva con "proximity": false en el JSON.
+      const pcfg = cfg.proximity;
+      if (pcfg !== false) {
+        this.proximity = new Proximity(typeof pcfg === 'object' ? pcfg : {}, rng, meshes);
+        this.meshFx.push(this.proximity);
       }
     }
 
@@ -351,7 +559,7 @@ export class MovementController {
       this.root.position.copy(this._pos);
     }
     if (this.jitter) this.jitter.apply(elapsed, this.root.position);
-    if (this.resp) this.root.scale.setScalar(this.resp.scale(elapsed, dt));
+    if (this.resp) this.resp.scale(elapsed, dt); // hincha por shader, no escala el grupo
 
     this.root.rotation.y += this.spin * localDt;
     for (const fx of this.meshFx) fx.update(dt); // el desgarro ocurre en tiempo real, no local

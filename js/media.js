@@ -75,53 +75,93 @@ export async function buildImage(url, meta) {
 // posición y una desalineación de rotación que nunca se corrige del todo.
 export function buildText(meta) {
   const text = meta.text ?? '';
-  const lines = text.split('\n');
   const fontSize = meta.fontSize ?? 64;
   const pad = fontSize * 0.6;
   const lineH = fontSize * 1.25;
   const color = meta.color ?? '#d8d2e0';
-  const font = `${meta.weight ?? 300} ${fontSize}px ${meta.font ?? 'ui-monospace, monospace'}`;
-
-  // Medir
-  const measure = document.createElement('canvas').getContext('2d');
-  measure.font = font;
-  const textW = Math.max(...lines.map(l => measure.measureText(l).width));
-
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const cw = Math.ceil(textW + pad * 2);
-  const ch = Math.ceil(lineH * lines.length + pad * 2);
-
-  const canvas = document.createElement('canvas');
-  canvas.width = cw * dpr;
-  canvas.height = ch * dpr;
-  const ctx = canvas.getContext('2d');
-  ctx.scale(dpr, dpr);
-  ctx.font = font;
-  ctx.fillStyle = color;
-  ctx.textBaseline = 'top';
-  ctx.textAlign = 'left';
-  lines.forEach((l, i) => ctx.fillText(l, pad, pad + i * lineH));
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
-  tex.minFilter = THREE.LinearFilter;
-
-  // Escala mundo: altura fija, ancho por proporción del canvas
-  const worldH = meta.size ?? 0.9;
-  const worldW = worldH * (cw / ch);
-
-  const mat = new THREE.MeshBasicMaterial({
-    map: tex, transparent: true, opacity: meta.opacity ?? 0.9,
-    depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
-  });
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(worldW, worldH), mat);
+  const weight = meta.weight ?? 300;
+  const family = meta.font ?? 'ui-monospace, monospace';
 
   const group = new THREE.Group();
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.MeshBasicMaterial({
+      transparent: true, opacity: meta.opacity ?? 0.9,
+      depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
+    })
+  );
   group.add(mesh);
+
+  // Rasteriza el texto a textura. `bold` es el conjunto de palabras (en
+  // minúscula, sin acentos) a poner en negrita — las que resuenan con el
+  // entorno. Re-render solo cuando ese conjunto cambia.
+  const norm = w => w.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w]/g, '');
+  function render(boldSet) {
+    const lines = text.split('\n');
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const measure = document.createElement('canvas').getContext('2d');
+    const fontOf = (w) => `${w} ${fontSize}px ${family}`;
+    measure.font = fontOf(weight);
+
+    // medir por línea, palabra a palabra (para poder engrosar algunas)
+    let textW = 0;
+    for (const l of lines) {
+      let lw = 0;
+      for (const word of l.split(' ')) {
+        measure.font = fontOf(boldSet?.has(norm(word)) ? 700 : weight);
+        lw += measure.measureText(word + ' ').width;
+      }
+      textW = Math.max(textW, lw);
+    }
+
+    const cw = Math.ceil(textW + pad * 2);
+    const ch = Math.ceil(lineH * lines.length + pad * 2);
+    const canvas = document.createElement('canvas');
+    canvas.width = cw * dpr; canvas.height = ch * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+
+    lines.forEach((l, i) => {
+      let x = pad;
+      const y = pad + i * lineH;
+      for (const word of l.split(' ')) {
+        const isBold = boldSet?.has(norm(word));
+        ctx.font = fontOf(isBold ? 700 : weight);
+        ctx.fillStyle = isBold ? '#ffffff' : color; // resaltado también aclara
+        ctx.fillText(word + ' ', x, y);
+        x += ctx.measureText(word + ' ').width;
+      }
+    });
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    tex.minFilter = THREE.LinearFilter;
+    if (mesh.material.map) mesh.material.map.dispose();
+    mesh.material.map = tex;
+    mesh.material.needsUpdate = true;
+
+    const worldH = meta.size ?? 0.9;
+    mesh.geometry.dispose();
+    mesh.geometry = new THREE.PlaneGeometry(worldH * (cw / ch), worldH);
+  }
+
+  render(null); // render inicial sin negritas
+
   group.userData.isText = true;
-  group.userData.billboard = true;   // el bucle lo orienta a cámara
+  group.userData.billboard = true;
   group.userData.textPlane = mesh;
+  // palabras del texto (normalizadas) y API de resaltado para el coordinador
+  group.userData.words = new Set(text.split(/\s+/).map(norm).filter(Boolean));
+  group.userData._boldKey = '';
+  group.userData.highlight = (boldSet) => {
+    const key = [...boldSet].sort().join(',');
+    if (key === group.userData._boldKey) return; // sin cambios, no re-render
+    group.userData._boldKey = key;
+    render(boldSet);
+  };
   return group;
 }
 
@@ -208,7 +248,24 @@ export class ConnectionLines {
   _trySpawn(objects) {
     const free = this.lines.find(s => !s.a);
     if (!free) return;
-    // Elegir un par cercano al azar
+
+    // Si hay pares por afinidad (Fase 3), elegir de ahí ponderando por peso;
+    // si no, caer a proximidad espacial (Fase 2).
+    if (this.pairs && this.pairs.length) {
+      // ruleta ponderada por afinidad
+      let total = 0;
+      for (const p of this.pairs) total += p.w;
+      let r = Math.random() * total;
+      let chosen = this.pairs[0];
+      for (const p of this.pairs) { r -= p.w; if (r <= 0) { chosen = p; break; } }
+      free.a = chosen.a; free.b = chosen.b;
+      free.age = 0;
+      free.life = this.life[0] + Math.random() * (this.life[1] - this.life[0]);
+      free.line.visible = true;
+      return;
+    }
+
+    // Fallback proximidad
     const i = Math.floor(Math.random() * objects.length);
     let best = null, bestD = this.maxDist;
     objects[i].root.getWorldPosition(_tmpA);
@@ -225,6 +282,9 @@ export class ConnectionLines {
     free.life = this.life[0] + Math.random() * (this.life[1] - this.life[0]);
     free.line.visible = true;
   }
+
+  // Fase 3 inyecta aquí los pares relacionados por tags.
+  setPairs(pairs) { this.pairs = pairs; }
 }
 const _tmpA = new THREE.Vector3();
 const _tmpB = new THREE.Vector3();

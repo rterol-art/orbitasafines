@@ -57,6 +57,6 @@ prueba (o puedes crear un `manifest.json` a mano con formato
 
 - [x] **Fase 1** — escena negra, IBL, catálogo en vivo vía API de GitHub, fallback procedural
 - [x] **Fase 2** — comportamientos declarativos: bucle imperfecto, playback degradado, jitter, respiración arrítmica, desgarro (evento raro, cap global), costura wireframe
-- [ ] **Fase 3** — fuerzas por solapamiento de tags + sincronización (Kuramoto)
+- [x] **Fase 3** — relaciones por tags (fuerzas + Kuramoto), líneas por afinidad, buscador por frase con expand sinonímico, deshielo
 - [ ] **Fase 4** — pipeline de compresión + cap adaptativo de rendimiento
 - [ ] **Fase 5** — buscador por frase (diccionario)

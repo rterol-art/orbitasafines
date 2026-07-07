@@ -12,6 +12,8 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MovementController, TearScheduler, makeRng } from './behaviors.js';
 import { buildImage, buildText, updateBillboard, ConnectionLines, Trails } from './media.js';
+import { RelationField } from './relations.js';
+import { search } from './search.js';
 
 // ---------- Configuración ----------
 const CONFIG = {
@@ -21,6 +23,9 @@ const CONFIG = {
   envIntensity: 1.0,
   connections: true,   // líneas finas intermitentes entre elementos
   trails: true,        // estela suave de imágenes y textos
+  relations: true,     // Fase 3: fuerzas y sincronización por tags
+  search: true,        // buscador por frase
+  searchFallback: 'random', // sin resultados: 'random' | 'none'
 };
 
 // ---------- Escena base ----------
@@ -81,6 +86,7 @@ const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matc
 // Efectos de escena (se inicializan tras cargar, cuando hay elementos)
 let connections = null;
 let trails = null;
+let relations = null;
 
 // ---------- Utilidades ----------
 function setHud(text, fade = false) {
@@ -298,10 +304,10 @@ const FALLBACK_MOVEMENTS = [
     layers: [{ type: 'respiracion', amount: 0.03, period: [5, 9] }],
     mesh: [{ type: 'costura', coverage: 0.3, speed: 0.08 }],
   },
-  { // desgarro (raro) sobre movimiento mínimo
+  { // deshielo (degradación permanente) sobre movimiento mínimo
     base: { type: 'bucle', radius: 0.5, period: 90 },
     layers: [{ type: 'jitter' }],
-    mesh: [{ type: 'desgarro', interval: [15, 40], strength: 0.3 }],
+    mesh: [{ type: 'deshielo', rate: 0.03, max: 0.4 }],
   },
 ];
 
@@ -316,16 +322,31 @@ function spawnFallback() {
   });
 }
 
-// ---------- Arranque ----------
-async function init() {
-  const entries = await loadCatalog();
-  const selection = entries
-    .sort(() => Math.random() - 0.5)
-    .slice(0, CONFIG.maxObjects);
+// ---------- Populado de escena (reutilizable: arranque y búsqueda) ----------
+let catalog = [];   // catálogo completo cargado una vez
 
+function clearScene() {
+  for (const o of objects) {
+    scene.remove(o.root);
+    o.root.traverse(n => {
+      if (n.geometry) n.geometry.dispose?.();
+      if (n.material) {
+        const mats = Array.isArray(n.material) ? n.material : [n.material];
+        mats.forEach(m => m.dispose?.());
+      }
+    });
+  }
+  objects.length = 0;
+  if (relations) relations = null;
+  // limpiar líneas y estelas activas
+  if (connections) connections.setPairs(null);
+}
+
+async function populate(selection) {
+  clearScene();
   if (selection.length === 0) {
     spawnFallback();
-    setHud('0 objetos — mallas de prueba', true);
+    setHud('sin resultados — muestra de prueba', true);
   } else {
     setHud(`cargando 0 / ${selection.length}`);
     let loaded = 0;
@@ -343,15 +364,72 @@ async function init() {
     setHud(`${objects.length} objetos`, true);
   }
 
-  // Efectos de escena: una vez hay elementos en la escena
+  // Efectos de escena
   if (!reducedMotion) {
-    if (CONFIG.connections) connections = new ConnectionLines(scene);
-    if (CONFIG.trails) trails = new Trails(scene);
+    if (CONFIG.connections && !connections) connections = new ConnectionLines(scene);
+    if (CONFIG.trails && !trails) trails = new Trails(scene);
+    if (CONFIG.relations && objects.filter(o => o.meta.tags?.length).length >= 2) {
+      relations = new RelationField(objects);
+      if (connections) connections.setPairs(relations.relatedPairs());
+    }
   }
+}
+
+// ---------- Arranque ----------
+async function init() {
+  catalog = await loadCatalog();
+  const selection = [...catalog]
+    .sort(() => Math.random() - 0.5)
+    .slice(0, CONFIG.maxObjects);
+  await populate(selection);
+  if (CONFIG.search) setupSearch();
+}
+
+// ---------- Buscador ----------
+function setupSearch() {
+  const input = document.getElementById('search');
+  if (!input) return;
+  input.addEventListener('keydown', async (e) => {
+    if (e.key !== 'Enter') return;
+    const phrase = input.value.trim();
+    if (!phrase) { // vacío → muestra aleatoria
+      await populate([...catalog].sort(() => Math.random() - 0.5).slice(0, CONFIG.maxObjects));
+      return;
+    }
+    const res = search(phrase, catalog, { max: CONFIG.maxObjects, fallback: CONFIG.searchFallback });
+    await populate(res.objects);
+    if (res.mode === 'fallback') setHud('nada respondió a esa frase', true);
+  });
 }
 
 // ---------- Bucle ----------
 const clock = new THREE.Clock();
+let textHighlightAcc = 0;
+const _wpA = new THREE.Vector3();
+const _wpB = new THREE.Vector3();
+
+// Para cada texto, resalta palabras que coincidan con tags de vecinos cercanos.
+const HIGHLIGHT_RADIUS = 4;
+function updateTextHighlights() {
+  for (const o of objects) {
+    if (!o.root.userData.words) continue;
+    const words = o.root.userData.words;
+    const bold = new Set();
+    o.root.getWorldPosition(_wpA);
+    for (const other of objects) {
+      if (other === o) continue;
+      const tags = other.meta.tags;
+      if (!tags?.length) continue;
+      other.root.getWorldPosition(_wpB);
+      if (_wpA.distanceTo(_wpB) > HIGHLIGHT_RADIUS) continue;
+      for (const tag of tags) {
+        const nt = tag.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w]/g, '');
+        if (words.has(nt)) bold.add(nt);
+      }
+    }
+    o.root.userData.highlight(bold);
+  }
+}
 
 function animate() {
   requestAnimationFrame(animate);
@@ -365,6 +443,18 @@ function animate() {
     if (o.root.userData.billboard) {
       updateBillboard(o.root, camera, t, o.root.userData.seed ?? 0);
     }
+  }
+
+  // Fase 3: las fuerzas relacionales mueven los anclas de los bucles
+  if (relations) relations.update(dt);
+
+  // Resaltado de textos: cada ~0.3s, cada texto pone en negrita las palabras
+  // que coincidan con tags de objetos cercanos. Umbral de distancia para que
+  // sea reconocimiento ocasional, no índice permanente.
+  textHighlightAcc += dt;
+  if (textHighlightAcc > 0.3) {
+    textHighlightAcc = 0;
+    updateTextHighlights();
   }
 
   if (trails) trails.update(dt, objects, camera);

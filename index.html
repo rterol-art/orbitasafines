@@ -30,6 +30,32 @@
     }
     #hud.faded { opacity: 0.25; }
 
+    /* Buscador: una línea casi invisible, centrada abajo. No parece UI:
+       parece una rendija por donde se puede hablar al espacio. */
+    #search {
+      position: fixed;
+      left: 50%; bottom: 34px;
+      transform: translateX(-50%);
+      width: min(440px, 76vw);
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid rgba(180, 170, 200, 0.15);
+      color: #cfc7dd;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 13px;
+      letter-spacing: 0.06em;
+      text-align: center;
+      padding: 6px 4px;
+      outline: none;
+      transition: border-color 0.6s ease, opacity 0.6s ease;
+      opacity: 0.4;
+    }
+    #search:focus {
+      border-bottom-color: rgba(180, 170, 200, 0.45);
+      opacity: 1;
+    }
+    #search::placeholder { color: rgba(180, 170, 200, 0.3); }
+
     @media (prefers-reduced-motion: reduce) {
       #hud { transition: none; }
     }
@@ -37,6 +63,8 @@
 </head>
 <body>
   <canvas id="scene"></canvas>
+  <input id="search" type="text" autocomplete="off" spellcheck="false"
+         placeholder="" aria-label="invocar" />
   <div id="hud">cargando</div>
 
   <script type="importmap">
