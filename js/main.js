@@ -242,9 +242,13 @@ async function loadObject(meta, index, total) {
     root.add(gltf.scene);
     normalize(gltf.scene, CONFIG.targetSize, meta.scale ?? 1);
     root.userData.isModel = true; // deja huella de silueta al moverse
+    // escala base aleatoria por objeto (carácter), estable por semilla de nombre
+    const rs = 0.75 + (hashString(meta.file) % 100) / 100 * 0.6; // 0.75–1.35
+    root.scale.multiplyScalar(rs);
   }
   root.position.copy(spawnPosition(index, total));
   root.userData.meta = meta;
+  if (meta.trailStrength != null) root.userData.trailStrength = meta.trailStrength;
   scene.add(root);
 
   // Los billboards (texto) no reciben rotación de comportamiento: el bucle
@@ -428,6 +432,9 @@ function updateTextHighlights() {
       }
     }
     o.root.userData.highlight(bold);
+    // relación 0..1 = palabras resonantes / total de palabras del texto
+    const ratio = words.size ? bold.size / words.size : 0;
+    o.root.userData._relRatio = ratio;
   }
 }
 
@@ -442,6 +449,10 @@ function animate() {
     // Los textos miran a cámara con temblor, tras el movimiento traslacional
     if (o.root.userData.billboard) {
       updateBillboard(o.root, camera, t, o.root.userData.seed ?? 0);
+    }
+    // Opacidad de texto según relación con el entorno (suavizado por frame)
+    if (o.root.userData.setRelationOpacity) {
+      o.root.userData.setRelationOpacity(o.root.userData._relRatio ?? 0);
     }
   }
 

@@ -162,21 +162,31 @@ export function buildText(meta) {
     group.userData._boldKey = key;
     render(boldSet);
   };
+  // Opacidad según relación con el entorno: mucho match = presente, nada = tenue.
+  group.userData.baseOpacity = meta.opacity ?? 0.9;
+  group.userData.minOpacity = meta.minOpacity ?? 0.35;
+  group.userData.setRelationOpacity = (ratio) => {
+    // ratio 0..1 = fracción de palabras del texto que resuenan con el entorno
+    const target = group.userData.minOpacity +
+      (group.userData.baseOpacity - group.userData.minOpacity) * Math.min(ratio * 2, 1);
+    mesh.material.opacity += (target - mesh.material.opacity) * 0.1; // suavizado
+  };
   return group;
 }
 
-// Orienta un grupo a la cámara con temblor + desalineación persistente.
-// Llamado desde el bucle para cada objeto con userData.billboard.
+// Orienta un grupo a la cámara. El texto debe permanecer LEGIBLE de frente:
+// la "duda" es una deriva mínima de posición y una inclinación casi
+// imperceptible, nunca un giro que cizalle el texto. Vibra en torno al texto
+// nítido, no lo rompe.
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
 export function updateBillboard(group, camera, t, seed) {
-  // Mirar a cámara
   group.quaternion.copy(camera.quaternion);
-  // Desalineación que nunca se corrige (lenta, por ruido) + temblor fino
-  const wobble = 0.05;
-  const rx = Math.sin(t * 0.7 + seed) * wobble + Math.sin(t * 5.3 + seed) * 0.006;
-  const ry = Math.cos(t * 0.5 + seed * 1.3) * wobble + Math.cos(t * 6.1 + seed) * 0.006;
-  const rz = Math.sin(t * 0.3 + seed * 0.7) * wobble * 0.6;
+  // Inclinación residual muy pequeña (antes 0.05 rad cizallaba el texto).
+  const tilt = 0.012;
+  const rx = Math.sin(t * 0.5 + seed) * tilt;
+  const ry = Math.cos(t * 0.4 + seed * 1.3) * tilt;
+  const rz = Math.sin(t * 0.25 + seed * 0.7) * tilt * 0.5;
   _e.set(rx, ry, rz);
   _q.setFromEuler(_e);
   group.quaternion.multiply(_q);
@@ -300,7 +310,7 @@ export class Trails {
     this.every = opts.every ?? 0.18;      // s entre muestras
     this.life = opts.life ?? 1.4;         // vida de cada eco
     this.maxOpacity = opts.maxOpacity ?? 0.16;
-    this.printOpacity = opts.printOpacity ?? 0.07; // huella de 3D: aún más sutil
+    this.printOpacity = opts.printOpacity ?? 0.14; // huella de 3D (antes 0.07, muy sutil)
     this.samples = [];                    // { mesh, age, base }
     this._acc = 0;
     this._softTex = makeSoftDiscTexture(); // gradiente radial compartido
@@ -369,9 +379,11 @@ export class Trails {
       cache = computeFootprint(root);
       root.userData.footprint = cache;
     }
+    // intensidad por objeto: un objeto principal puede dejar más rastro
+    const op = this.printOpacity * (root.userData.trailStrength ?? 1);
     const echo = new THREE.Mesh(_discGeo, new THREE.MeshBasicMaterial({
       map: this._softTex, color: cache.color, transparent: true,
-      opacity: this.printOpacity, depthWrite: false, side: THREE.DoubleSide,
+      opacity: op, depthWrite: false, side: THREE.DoubleSide,
       toneMapped: false, blending: THREE.AdditiveBlending,
     }));
     root.getWorldPosition(echo.position);
@@ -379,7 +391,7 @@ export class Trails {
     echo.scale.setScalar(r * 2);
     if (camera) echo.quaternion.copy(camera.quaternion);
     this.scene.add(echo);
-    this.samples.push({ mesh: echo, age: 0, base: this.printOpacity, billboard: true });
+    this.samples.push({ mesh: echo, age: 0, base: op, billboard: true });
   }
 }
 const _qTrail = new THREE.Quaternion();

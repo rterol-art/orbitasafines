@@ -248,3 +248,47 @@ Un texto pone en NEGRITA (y aclara) las palabras de su contenido que coincidan
 con tags de objetos cercanos. Reconocimiento ocasional, no índice: solo dentro
 de un radio y con re-render únicamente al cambiar. La relación se hace visible
 en el propio lenguaje del texto.
+
+---
+
+## AMPLIACIÓN v8 (ajustes sobre Fase 3)
+
+### Relaciones ponderadas: tags fuertes, expand ligero
+Ahora `expand` SÍ influye en relaciones, pero con peso 1/4 respecto a `tags`.
+Coincidir en tags principales = relación pesada; coincidir solo en sinónimos
+= relación ligera. No colapsa el grafo porque el peso es bajo.
+
+### Modulación automática por relación
+- **Escala**: base aleatoria por objeto (0.75–1.35) × hasta +30% según cuánta
+  relación tenga con el entorno. Los muy conectados son algo mayores.
+- **Period (tempo)**: los objetos muy relacionados van más LENTOS (hasta 2×);
+  los poco relacionados, más ligeros. La relación asienta.
+
+### Órbita sobre otro objeto (`orbits`)
+Declara `"orbits": "nombre-archivo.glb"` para que un objeto gire alrededor de
+OTRO en vez de su propio centro. Restricción: el objetivo no puede a su vez
+orbitar a nadie (jerarquía acíclica). Decisión de obra: qué gira alrededor de
+qué lo decides tú, no el azar. *(pendiente de tu confirmación para activar)*
+
+### Colisiones
+Cuando dos objetos se acercan por debajo de la distancia mínima: ambos suben
+el jitter a 0.03 durante el impacto (y decae), y su bucle pierde un 3% de
+mutación por choque (cada golpe los asienta un poco). Con histéresis para no
+redispararse mientras siguen solapados.
+
+### `avoid` — vibración de pinchos orientada
+La vibración por proximidad (olas si afín, pinchos si hostil) ahora aparece
+SOLO en las caras orientadas hacia el objeto que la provoca, con algo de
+random en el borde de la zona.
+
+### `trailStrength` — intensidad de estela por objeto
+Multiplicador sobre la huella de silueta. `1` normal, `2` deja el doble de
+rastro. Para destacar un objeto principal:
+```json
+{ "tags": [...], "trailStrength": 2.0 }
+```
+
+### Texto: vibración corregida + opacidad por relación
+El texto ya no se cizalla (la inclinación bajó de 0.05 a 0.012 rad): vibra en
+torno al texto nítido, permanece legible. Y su opacidad baja cuando tiene poca
+relación con el entorno (`minOpacity`, def. 0.35), sube cuando resuena.

@@ -8,24 +8,38 @@
 
 import * as THREE from 'three';
 
-// ---------- Afinidad entre dos conjuntos de tags ----------
-// Solapamiento ponderado tipo Jaccard asimétrico. Ahora con signo: si A
-// tiene tags que B declara en su lista de exclusión (avoid), o viceversa,
-// la afinidad puede ser NEGATIVA → repulsión y vibración de pinchos.
-export function affinity(tagsA, tagsB, avoidA = [], avoidB = []) {
-  if (!tagsA?.length || !tagsB?.length) return 0;
+// ---------- Afinidad entre dos objetos ----------
+// Los TAGS principales pesan fuerte; los EXPAND (sinónimos) pesan poco —
+// dan relación ligera sin colapsar el grafo. Con signo: los tags en la
+// lista `avoid` del otro restan (afinidad negativa → repulsión y pinchos).
+const EXPAND_WEIGHT = 0.25; // un match de sinónimo vale 1/4 de un tag principal
+
+export function affinity(a, b) {
+  const tagsA = a.tags ?? [], tagsB = b.tags ?? [];
+  if (!tagsA.length || !tagsB.length) return 0;
   const setB = new Set(tagsB);
   let shared = 0;
   for (const t of tagsA) if (setB.has(t)) shared++;
-  const pos = shared > 0 ? shared / Math.min(tagsA.length, tagsB.length) : 0;
 
-  // exclusión: cuántos tags del otro están en mi lista de avoid
+  // matches de expand (sinónimos), peso reducido
+  const expA = a.expand ?? [], expB = b.expand ?? [];
+  let softShared = 0;
+  if (expA.length || expB.length) {
+    const allB = new Set([...tagsB, ...expB]);
+    const allA = new Set([...tagsA, ...expA]);
+    for (const t of expA) if (allB.has(t)) softShared++;
+    for (const t of tagsA) if (expB.includes(t)) softShared++;
+  }
+  const pos = (shared + softShared * EXPAND_WEIGHT) / Math.min(tagsA.length, tagsB.length);
+
+  // exclusión
+  const avoidA = a.avoid ?? [], avoidB = b.avoid ?? [];
   let conflict = 0;
   if (avoidA.length) { const s = new Set(avoidA); for (const t of tagsB) if (s.has(t)) conflict++; }
   if (avoidB.length) { const s = new Set(avoidB); for (const t of tagsA) if (s.has(t)) conflict++; }
   const neg = conflict > 0 ? conflict / Math.min(tagsA.length, tagsB.length) : 0;
 
-  return pos - neg; // -1..1
+  return Math.max(-1, Math.min(1, pos - neg));
 }
 
 // ============================================================
@@ -43,13 +57,14 @@ export class RelationField {
       return {
         root: o.root,
         tags: (o.meta.tags ?? []),
+        expand: (o.meta.expand ?? []),
         avoid: (o.meta.avoid ?? []),
-        anchor,                       // referencia viva al anchor del bucle
-        home: anchor.clone(),         // posición de reposo original
+        anchor,
+        home: anchor.clone(),
         vel: new THREE.Vector3(),
         controller: o.controller,
-        // uniform de proximidad del shader de vibración (si el objeto lo tiene)
         prox: o.controller?.proximity ?? null,
+        totalRel: 0,   // suma de afinidades positivas con el resto (se calcula abajo)
       };
     });
 
@@ -67,15 +82,23 @@ export class RelationField {
     for (let i = 0; i < n; i++) {
       this.aff[i] = [];
       for (let j = 0; j < n; j++) {
-        this.aff[i][j] = i === j ? 0 : affinity(
-          this.nodes[i].tags, this.nodes[j].tags,
-          this.nodes[i].avoid, this.nodes[j].avoid
-        );
+        this.aff[i][j] = i === j ? 0 : affinity(this.nodes[i], this.nodes[j]);
       }
     }
 
+    // Relación total de cada nodo: suma de afinidades positivas. Modula el
+    // tempo (más relación → más lento) y la escala (más relación → más grande).
+    for (let i = 0; i < n; i++) {
+      let sum = 0;
+      for (let j = 0; j < n; j++) if (this.aff[i][j] > 0) sum += this.aff[i][j];
+      this.nodes[i].totalRel = sum;
+    }
+    this._applyRelationModulation();
+
     this._f = new THREE.Vector3();
     this._d = new THREE.Vector3();
+    this._pt = new THREE.Vector3();
+    this._colliding = new Set();
   }
 
   // Devuelve las parejas con afinidad > umbral, para las líneas de conexión.
@@ -137,10 +160,62 @@ export class RelationField {
     }
 
     this._updateProximity();
+    this._detectCollisions();
     this._syncPhases(h);
   }
 
-  // Para cada nodo con shader de proximidad, encuentra el vecino con mayor
+  // Choques entre objetos: cuando dos se acercan por debajo de la distancia
+  // mínima, ambos suben el jitter (temblor del impacto) y su bucle pierde un
+  // poco de mutación (cada choque los "asienta" ligeramente). Cooldown para
+  // no disparar cada frame mientras siguen solapados.
+  _detectCollisions() {
+    const minD = this.collideDist ?? 1.0;
+    const n = this.nodes.length;
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const d = this.nodes[i].root.position.distanceTo(this.nodes[j].root.position);
+        const key = i * 1000 + j;
+        if (d < minD) {
+          if (!this._colliding.has(key)) {
+            this._colliding.add(key);
+            for (const nd of [this.nodes[i], this.nodes[j]]) {
+              nd.controller?.jitter?.collide(0.03);
+              // reducir mutación un 3% por choque (mínimo 0)
+              if (nd.controller?.base) {
+                nd.controller.base.mutation = Math.max(0, nd.controller.base.mutation * 0.97);
+              }
+            }
+          }
+        } else if (d > minD * 1.4) {
+          this._colliding.delete(key); // histéresis: rearmar al separarse
+        }
+      }
+    }
+  }
+
+  // Modula tempo y escala según cuánta relación tiene cada objeto:
+  //  - más relación → bucle más LENTO (gravita, se asienta).
+  //  - más relación → escala algo mayor (presencia por conexión).
+  // Se aplica una vez; la escala base aleatoria ya vive en el objeto.
+  _applyRelationModulation() {
+    // normalizar totalRel a 0..1 sobre el máximo de la escena
+    let maxRel = 0;
+    for (const nd of this.nodes) maxRel = Math.max(maxRel, nd.totalRel);
+    if (maxRel <= 0) return;
+    for (const nd of this.nodes) {
+      const r = nd.totalRel / maxRel; // 0..1
+      const ctrl = nd.controller;
+      if (!ctrl) continue;
+      // tempo: hasta 2x más lento con relación máxima
+      if (ctrl.base) {
+        ctrl.base.w = ctrl.base.w / (1 + r); // w = velocidad angular; menor = más lento
+      }
+      // escala: hasta +30% sobre la base aleatoria, acotado
+      const factor = 1 + r * 0.3;
+      nd.root.scale.multiplyScalar(factor);
+      nd.baseScale = nd.root.scale.x;
+    }
+  }
   // |afinidad| dentro de un radio, y le pasa (cercanía 0..1, afinidad -1..1).
   // La superficie ondula (afín) o forma pinchos (rechazo) según se acerquen.
   _updateProximity() {
@@ -149,20 +224,27 @@ export class RelationField {
     for (let i = 0; i < n; i++) {
       const ni = this.nodes[i];
       if (!ni.prox) continue;
-      let bestNear = 0, bestAff = 0;
+      let bestNear = 0, bestAff = 0, bestJ = -1;
       for (let j = 0; j < n; j++) {
         if (i === j) continue;
         const a = this.aff[i][j];
         if (a === 0) continue;
         const dist = ni.root.position.distanceTo(this.nodes[j].root.position);
         if (dist > radius) continue;
-        const near = 1 - dist / radius;           // 0 lejos, 1 pegado
+        const near = 1 - dist / radius;
         const weight = near * Math.abs(a);
         if (weight > bestNear * Math.abs(bestAff) || bestNear === 0) {
-          bestNear = near; bestAff = a;
+          bestNear = near; bestAff = a; bestJ = j;
         }
       }
-      ni.prox.set(bestNear, bestAff);
+      // dirección al vecino, en el espacio LOCAL del objeto (para el shader)
+      if (bestJ >= 0) {
+        this._d.subVectors(this.nodes[bestJ].root.position, ni.root.position);
+        ni.root.worldToLocal(this._pt.copy(this.nodes[bestJ].root.position));
+        ni.prox.set(bestNear, bestAff, this._pt.normalize());
+      } else {
+        ni.prox.set(0, 0, null);
+      }
     }
   }
 

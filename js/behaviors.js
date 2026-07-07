@@ -119,15 +119,21 @@ class BucleImperfecto {
 // ============================================================
 class Jitter {
   constructor(cfg, rng) {
-    this.amp = pick(cfg.amplitude ?? 0.008, rng);
+    this.baseAmp = pick(cfg.amplitude ?? 0.008, rng);
+    this.amp = this.baseAmp;
     this.freq = pick(cfg.frequency ?? 14, rng);
     this.seed = rng() * 100;
-    // Intermitencia: el jitter va y viene en ráfagas (gate lento)
     this.gate = cfg.intermittent ?? true;
+    this.boost = 0;          // amplitud extra por colisión, decae sola
   }
-  apply(t, pos) {
+  // Llamado al chocar: sube la amplitud a `target` y luego decae.
+  collide(target = 0.03) { this.boost = Math.max(this.boost, target - this.baseAmp); }
+  apply(t, pos, dt = 0.016) {
+    // decaer el boost de colisión
+    if (this.boost > 0) this.boost = Math.max(0, this.boost - dt * 0.04);
+    this.amp = this.baseAmp + this.boost;
     let g = 1;
-    if (this.gate) {
+    if (this.gate && this.boost <= 0.0001) { // durante el choque, jitter continuo
       g = THREE.MathUtils.smoothstep(noise1(t * 0.15, this.seed + 50), 0.45, 0.7);
       if (g <= 0) return;
     }
@@ -457,16 +463,18 @@ class Proximity {
       uProxTime: { value: 0 },
       uProxNear: { value: 0 },       // 0..1 cuán cerca está el vecino relevante
       uProxAffinity: { value: 0 },   // -1..1 afinidad con ese vecino
-      uProxWave: { value: pick(cfg.wave ?? 0.04, rng) },   // amplitud onda (afín)
-      uProxSpike: { value: pick(cfg.spike ?? 0.12, rng) }, // amplitud pincho (rechazo)
+      uProxDir: { value: new THREE.Vector3(0, 0, 1) }, // dir al vecino (espacio local)
+      uProxWave: { value: pick(cfg.wave ?? 0.04, rng) },
+      uProxSpike: { value: pick(cfg.spike ?? 0.12, rng) },
       uProxSeed: { value: rng() * 100 },
     };
     for (const m of meshes) injectProximity(m.material, this.uniforms);
   }
   update(dt) { this.uniforms.uProxTime.value += dt; }
-  set(near, affinity) {
+  set(near, affinity, dirLocal) {
     this.uniforms.uProxNear.value = near;
     this.uniforms.uProxAffinity.value = affinity;
+    if (dirLocal) this.uniforms.uProxDir.value.copy(dirLocal);
   }
 }
 
@@ -478,19 +486,27 @@ function injectProximity(material, uniforms) {
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
         uniform float uProxTime; uniform float uProxNear; uniform float uProxAffinity;
-        uniform float uProxWave; uniform float uProxSpike; uniform float uProxSeed;`)
+        uniform vec3 uProxDir; uniform float uProxWave; uniform float uProxSpike; uniform float uProxSeed;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         {
           float near = uProxNear;
           if (near > 0.001) {
-            if (uProxAffinity >= 0.0) {
-              float w = sin(position.y * 6.0 + uProxTime * 3.0 + uProxSeed)
-                      * sin(position.x * 4.0 - uProxTime * 2.0);
-              transformed += normalize(objectNormal) * w * uProxWave * near * uProxAffinity;
-            } else {
-              float s = sin(dot(position, vec3(23.1, 31.7, 19.3)) + uProxTime * 18.0 + uProxSeed);
-              s = pow(abs(s), 6.0) * sign(s);
-              transformed += normalize(objectNormal) * s * uProxSpike * near * (-uProxAffinity);
+            // sólo afecta a las caras orientadas hacia el vecino: producto
+            // escalar normal·dirección, con un poco de ruido para que el
+            // borde de la zona afectada no sea limpio.
+            float facing = dot(normalize(objectNormal), normalize(uProxDir));
+            float noise = 0.15 * sin(dot(position, vec3(17.1, 9.3, 13.7)) + uProxSeed);
+            float zone = smoothstep(0.1, 0.9, facing + noise);
+            if (zone > 0.0) {
+              if (uProxAffinity >= 0.0) {
+                float w = sin(position.y * 6.0 + uProxTime * 3.0 + uProxSeed)
+                        * sin(position.x * 4.0 - uProxTime * 2.0);
+                transformed += normalize(objectNormal) * w * uProxWave * near * uProxAffinity * zone;
+              } else {
+                float s = sin(dot(position, vec3(23.1, 31.7, 19.3)) + uProxTime * 18.0 + uProxSeed);
+                s = pow(abs(s), 6.0) * sign(s);
+                transformed += normalize(objectNormal) * s * uProxSpike * near * (-uProxAffinity) * zone;
+              }
             }
           }
         }`);
@@ -558,7 +574,7 @@ export class MovementController {
       this.base.pose(this.localT, this._pos);
       this.root.position.copy(this._pos);
     }
-    if (this.jitter) this.jitter.apply(elapsed, this.root.position);
+    if (this.jitter) this.jitter.apply(elapsed, this.root.position, dt);
     if (this.resp) this.resp.scale(elapsed, dt); // hincha por shader, no escala el grupo
 
     this.root.rotation.y += this.spin * localDt;
