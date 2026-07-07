@@ -1,6 +1,19 @@
 {
   "tags": ["frase", "aura", "brújula"],
   "text": "el algoritmo intentó capturar algo\nperdió el aura por el camino\nla pintura busca en los restos",
+  "expand": [
+  "oración", "expresión", "cita", "verso", "poema", "enunciado", "sentencia", "texto",
+  "energía", "halo", "esencia", "atmósfera", "vibra", "alma", "magnetismo", "resplandor",
+  "guía", "norte", "orientación", "rumbo", "faro", "referencia", "compás",
+  "código", "programa", "sistema", "cálculo", "proceso", "software", "secuencia", "IA",
+  "procurar", "tratar", "ensayar", "pretender", "probar",
+  "atrapar", "retener", "plasmar", "registrar", "aprehender", "inmortalizar", "coger",
+  "extraviar", "olvidar", "dejar", "desaparecer", "esfumarse",
+  "ruta", "vía", "sendero", "trayecto", "recorrido", "paso", "senda",
+  "arte", "lienzo", "cuadro", "obra", "ilustración", "pigmento", "color",
+  "rastrear", "explorar", "indagar", "investigar", "escarbar",
+  "ruinas", "vestigios", "sobras", "fragmentos", "pedazos", "despojos", "huellas", "reliquias", "escombros", "residuos"
+]
   "size": 0.7,
   "color": "#c9bfd6",
   "weight": 300,
