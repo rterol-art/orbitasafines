@@ -1,5 +1,21 @@
 {
   "tags": ["frase", "aura", "brújula"],
+  "expand": 
+  [
+  "oración", "expresión", "cita", "dicho", "enunciado", "sentencia", "texto", "palabras",
+  "energía", "halo", "irradiación", "carisma", "atmósfera", "esencia", "vibra", "magnetismo",
+  "guía", "norte", "orientación", "compás", "derrotero", "rumbo", "faro", "referencia",
+  "oscuridad", "madrugada", "velada", "anochecer", "penumbra", "sombras",
+  "conversar", "charlar", "dialogar", "comunicar", "platicar", "parlamentar", "expresarse",
+  "pudor", "timidez", "rubor", "bochorno", "apuro", "corte", "turbación", "deshonra",
+  "experimentar", "padecer", "notar", "percibir", "sufrir",
+  "existencia", "realidad", "vivencia", "ser",
+  "secreta", "personal", "reservada", "aislada", "clandestina",
+  "privacidad", "reserva", "secreto", "fuero interno", "recogimiento", "confidencialidad",
+  "desear", "anhelar", "apetecer", "buscar", "aspirar",
+  "escondido", "silenciado", "tapado", "encubierto", "disimulado", "velado", "camuflado", "omitido",
+  "opuesto", "inverso", "distinto", "antagónico", "reverso", "diferente", "contradictorio"
+  ]
   "text": "Por la noche salen por ahí, y a mí, personalmente,\nme ha tocado hablar con ellos un par de veces.\nLo peor es la vergüenza que sienten. Pero se trata de su vida privada,\nde su intimidad, y de lo que ellos quieren y de lo que han ocultado;\nson así precisamente porque son todo lo contrario.",
   "size": 0.7,
   "color": "#c9bfd6",
