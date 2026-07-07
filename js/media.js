@@ -68,11 +68,8 @@ export async function buildImage(url, meta) {
 }
 
 // ============================================================
-// TEXTO — billboard que duda
+// TEXTO — billboard que duda (VERSIÓN ALTA NITIDEZ)
 // ============================================================
-// Se rasteriza a textura sobre canvas (control tipográfico total, sin cargar
-// fuentes externas). El plano mira a cámara SIEMPRE, pero con temblor de
-// posición y una desalineación de rotación que nunca se corrige del todo.
 export function buildText(meta) {
   const text = meta.text ?? '';
   const fontSize = meta.fontSize ?? 64;
@@ -92,18 +89,19 @@ export function buildText(meta) {
   );
   group.add(mesh);
 
-  // Rasteriza el texto a textura. `bold` es el conjunto de palabras (en
-  // minúscula, sin acentos) a poner en negrita — las que resuenan con el
-  // entorno. Re-render solo cuando ese conjunto cambia.
   const norm = w => w.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w]/g, '');
+  
   function render(boldSet) {
     const lines = text.split('\n');
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    
+    // 1. FORZAR ALTA RESOLUCIÓN: Sobrescalamos el canvas para máxima nitidez
+    const baseDpr = window.devicePixelRatio || 1;
+    const renderScale = Math.max(baseDpr, 2) * 2.5; // Multiplicador de super-sampling
+    
     const measure = document.createElement('canvas').getContext('2d');
     const fontOf = (w) => `${w} ${fontSize}px ${family}`;
     measure.font = fontOf(weight);
 
-    // medir por línea, palabra a palabra (para poder engrosar algunas)
     let textW = 0;
     for (const l of lines) {
       let lw = 0;
@@ -116,10 +114,17 @@ export function buildText(meta) {
 
     const cw = Math.ceil(textW + pad * 2);
     const ch = Math.ceil(lineH * lines.length + pad * 2);
+    
     const canvas = document.createElement('canvas');
-    canvas.width = cw * dpr; canvas.height = ch * dpr;
+    canvas.width = Math.ceil(cw * renderScale); 
+    canvas.height = Math.ceil(ch * renderScale);
     const ctx = canvas.getContext('2d');
-    ctx.scale(dpr, dpr);
+    
+    // Suavizado nativo del canvas activado explícitamente
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    
+    ctx.scale(renderScale, renderScale);
     ctx.textBaseline = 'top';
     ctx.textAlign = 'left';
 
@@ -129,16 +134,24 @@ export function buildText(meta) {
       for (const word of l.split(' ')) {
         const isBold = boldSet?.has(norm(word));
         ctx.font = fontOf(isBold ? 700 : weight);
-        ctx.fillStyle = isBold ? '#ffffff' : color; // resaltado también aclara
-        ctx.fillText(word + ' ', x, y);
+        ctx.fillStyle = isBold ? '#ffffff' : color; 
+        
+        // 2. PIXEL SNAPPING: Redondear x e y elimina el sub-pixel blurring
+        ctx.fillText(word + ' ', Math.round(x), Math.round(y));
+        
         x += ctx.measureText(word + ' ').width;
       }
     });
 
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 4;
-    tex.minFilter = THREE.LinearFilter;
+    
+    // 3. FILTROS Y MIPMAPS: Crucial para la nitidez en movimiento/distancia
+    tex.generateMipmaps = true;
+    tex.minFilter = THREE.LinearMipmapLinearFilter; // Suavidad en la distancia
+    tex.magFilter = THREE.LinearFilter;             // Nitidez de cerca
+    tex.anisotropy = 16;                            // Máxima calidad en ángulos oblicuos
+
     if (mesh.material.map) mesh.material.map.dispose();
     mesh.material.map = tex;
     mesh.material.needsUpdate = true;
@@ -148,28 +161,25 @@ export function buildText(meta) {
     mesh.geometry = new THREE.PlaneGeometry(worldH * (cw / ch), worldH);
   }
 
-  render(null); // render inicial sin negritas
+  render(null); 
 
   group.userData.isText = true;
   group.userData.billboard = true;
   group.userData.textPlane = mesh;
-  // palabras del texto (normalizadas) y API de resaltado para el coordinador
   group.userData.words = new Set(text.split(/\s+/).map(norm).filter(Boolean));
   group.userData._boldKey = '';
   group.userData.highlight = (boldSet) => {
     const key = [...boldSet].sort().join(',');
-    if (key === group.userData._boldKey) return; // sin cambios, no re-render
+    if (key === group.userData._boldKey) return; 
     group.userData._boldKey = key;
     render(boldSet);
   };
-  // Opacidad según relación con el entorno: mucho match = presente, nada = tenue.
   group.userData.baseOpacity = meta.opacity ?? 0.9;
   group.userData.minOpacity = meta.minOpacity ?? 0.35;
   group.userData.setRelationOpacity = (ratio) => {
-    // ratio 0..1 = fracción de palabras del texto que resuenan con el entorno
     const target = group.userData.minOpacity +
       (group.userData.baseOpacity - group.userData.minOpacity) * Math.min(ratio * 2, 1);
-    mesh.material.opacity += (target - mesh.material.opacity) * 0.1; // suavizado
+    mesh.material.opacity += (target - mesh.material.opacity) * 0.1; 
   };
   return group;
 }
