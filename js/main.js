@@ -54,6 +54,76 @@ controls.dampingFactor = 0.06;
 controls.minDistance = 1.5;
 controls.maxDistance = 40;
 
+// ---------- Selección y seguimiento ----------
+// Al hacer click en un objeto, la cámara lo centra y lo SIGUE en su órbita
+// desplazándose con él (no rotando alrededor): mantiene el ángulo de visión
+// y traslada cámara+target según el movimiento del objeto cada frame.
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+let followed = null;                 // { root } que la cámara sigue
+const _followPrev = new THREE.Vector3();
+const _followDelta = new THREE.Vector3();
+let _pointerDownPos = null;
+
+function objectRootFromHit(obj) {
+  // sube hasta el root registrado en `objects`
+  let o = obj;
+  while (o) {
+    if (o.userData?.meta) return o;
+    o = o.parent;
+  }
+  return null;
+}
+
+function onPointerDown(e) {
+  _pointerDownPos = { x: e.clientX, y: e.clientY };
+}
+
+function onPointerUp(e) {
+  // distinguir click de arrastre (orbit): si el puntero se movió mucho, no es click
+  if (!_pointerDownPos) return;
+  const moved = Math.hypot(e.clientX - _pointerDownPos.x, e.clientY - _pointerDownPos.y);
+  _pointerDownPos = null;
+  if (moved > 6) return;
+
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const roots = objects.map(o => o.root);
+  const hits = raycaster.intersectObjects(roots, true);
+  if (hits.length) {
+    const root = objectRootFromHit(hits[0].object);
+    if (root) selectObject(root);
+  } else {
+    releaseFollow(); // click en el vacío: soltar
+  }
+}
+
+function selectObject(root) {
+  followed = { root };
+  root.getWorldPosition(_followPrev);
+  // llevar el target de la cámara al objeto suavemente (en el bucle)
+  _retargetTo.copy(_followPrev);
+  _retargeting = true;
+  const meta = root.userData.meta;
+  setHud(meta?.tags?.length ? meta.tags.slice(0, 5).join(' · ') : 'objeto', true);
+}
+
+function releaseFollow() {
+  followed = null;
+  _retargeting = false;
+  setHud(`${objects.length} objetos`, true);
+}
+
+const _retargetTo = new THREE.Vector3();
+let _retargeting = false;
+
+renderer.domElement.addEventListener('pointerdown', onPointerDown);
+renderer.domElement.addEventListener('pointerup', onPointerUp);
+// doble click o Escape suelta el seguimiento
+window.addEventListener('keydown', e => { if (e.key === 'Escape') releaseFollow(); });
+
 // ---------- Iluminación ----------
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
@@ -455,12 +525,6 @@ function updateTextHighlights() {
     // relación 0..1 = palabras resonantes / total de palabras del texto
     const ratio = words.size ? bold.size / words.size : 0;
     o.root.userData._relRatio = ratio;
-    // Poca relación → el texto se atenúa hacia 0.4; con resonancia → 0.9.
-    const plane = o.root.userData.textPlane;
-    if (plane) {
-      const target = bold.size > 0 ? 0.9 : 0.45;
-      plane.material.opacity += (target - plane.material.opacity) * 0.12;
-    }
   }
 }
 
@@ -493,9 +557,34 @@ function animate() {
   if (trails) trails.update(dt, objects, camera);
   if (connections) connections.update(dt, objects);
 
+  // Seguimiento: la cámara se desplaza con el objeto seguido (no rota).
+  if (followed) {
+    if (!followed.root.parent) {
+      releaseFollow();             // el objeto salió de escena
+    } else {
+      followed.root.getWorldPosition(_followCur);
+      if (_retargeting) {
+        // aproximar suavemente el target al objeto la primera vez
+        controls.target.lerp(_followCur, 0.08);
+        camera.position.lerp(
+          _tmpCam.copy(camera.position).add(_followCur).sub(controls.target), 0.08
+        );
+        if (controls.target.distanceTo(_followCur) < 0.05) _retargeting = false;
+      } else {
+        // seguir: aplicar el mismo desplazamiento del objeto a cámara y target
+        _followDelta.subVectors(_followCur, _followPrev);
+        controls.target.add(_followDelta);
+        camera.position.add(_followDelta);
+      }
+      _followPrev.copy(_followCur);
+    }
+  }
+
   controls.update();
   renderer.render(scene, camera);
 }
+const _followCur = new THREE.Vector3();
+const _tmpCam = new THREE.Vector3();
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;

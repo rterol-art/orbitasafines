@@ -145,7 +145,13 @@ export class RelationField {
     for (let i = 0; i < this.nodes.length; i++) {
       for (let j = i + 1; j < this.nodes.length; j++) {
         if (this.aff[i][j] > threshold) {
-          pairs.push({ a: this.nodes[i].root, b: this.nodes[j].root, w: this.aff[i][j] });
+          // tags compartidos (el concepto que los une), para mostrarlo en el viaje
+          const setB = new Set(this.nodes[j].tags);
+          const shared = this.nodes[i].tags.filter(t => setB.has(t));
+          pairs.push({
+            a: this.nodes[i].root, b: this.nodes[j].root,
+            w: this.aff[i][j], shared,
+          });
         }
       }
     }

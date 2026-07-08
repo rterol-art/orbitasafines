@@ -375,3 +375,20 @@ en el JSON multiplica la intensidad de su estela (para el objeto principal).
   puntos con una cola corta que de vez en cuando viajan en línea recta de un
   objeto a otro relacionado. Una señal que se transmite, no un vínculo fijo.
   Config en ConnectionLines: `speed`, `spawnEvery`, `dotSize`, `trailDots`.
+
+---
+
+## v11 — cámara que sigue + concepto en el trayecto
+
+### Click para centrar y seguir
+Click sobre un objeto: la cámara lo centra y lo SIGUE en su órbita
+DESPLAZÁNDOSE con él (mantiene ángulo y distancia, no rota alrededor).
+Click en el vacío o tecla Escape: suelta el seguimiento. Arrastrar sigue
+orbitando libremente (se distingue click de arrastre por el movimiento).
+
+### El concepto aflora en el viaje
+Cuando un punto viajero recorre la relación entre dos objetos, a veces
+(`showConcept`, def. 0.4) lleva consigo, muy tenue, UNO de los tags que ambos
+comparten — la palabra que los une, emergiendo en el trayecto y disolviéndose.
+No es un nodo de un diagrama: es niebla conceptual, el concepto visto de paso.
+Los tags dejan de ser invisibles sin convertirse en etiquetas fijas.
