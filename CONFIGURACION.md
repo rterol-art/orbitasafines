@@ -358,3 +358,20 @@ en el JSON multiplica la intensidad de su estela (para el objeto principal).
   El buscador vacío + Enter hace lo mismo.
 - **Círculo de carga**: un disco difuminado pulsante aparece en el centro
   mientras cargan los modelos, anticipando su aparición.
+
+---
+
+## CORRECCIONES v10
+
+- **Texto legible (de verdad)**: quitados TODOS los reductores acumulados.
+  Sin jitter, sin respiración, sin inclinación de billboard (mira a cámara
+  plano y quieto), y SIN el atenuado por relación que lo dejaba invisible.
+  Render a alta resolución (supersampling ×2 + mipmaps) para nitidez sobre
+  negro. La relación con el entorno se expresa SOLO en las negritas, no
+  atenuando el bloque. El texto ya no se pierde.
+- **Círculo de carga**: ahora se oculta siempre al terminar (try/finally),
+  incluso si una carga falla.
+- **Conexiones = puntos viajeros**: en vez de líneas dibujadas, pequeños
+  puntos con una cola corta que de vez en cuando viajan en línea recta de un
+  objeto a otro relacionado. Una señal que se transmite, no un vínculo fijo.
+  Config en ConnectionLines: `speed`, `spawnEvery`, `dotSize`, `trailDots`.

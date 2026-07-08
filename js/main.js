@@ -243,7 +243,7 @@ async function loadObject(meta, index, total) {
     const userBase = meta.movement?.base ?? { type: 'bucle', period: [60, 90], radius: [1.5, 2.5], mutation: 0.04 };
     meta = { ...meta, movement: {
       base: userBase,
-      layers: [{ type: 'jitter', amplitude: 0.002, frequency: 6, intermittent: false }],
+      layers: [], // sin jitter ni respiración: el texto solo deriva, nítido y quieto
     }};
   } else { // model
     const gltf = await gltfLoader.loadAsync(`./objects/${meta.file}`);
@@ -361,26 +361,29 @@ async function populate(selection) {
   clearScene();
   const loader = document.getElementById('loader');
   if (loader) loader.classList.add('on');
-  if (selection.length === 0) {
-    spawnFallback();
-    setHud('sin resultados — muestra de prueba', true);
-  } else {
-    setHud(`cargando 0 / ${selection.length}`);
-    let loaded = 0;
-    const results = await Promise.allSettled(
-      selection.map((meta, i) =>
-        loadObject(meta, i, selection.length).then(() => {
-          loaded++;
-          setHud(`cargando ${loaded} / ${selection.length}`);
-        })
-      )
-    );
-    results
-      .filter(r => r.status === 'rejected')
-      .forEach(r => console.warn('[espacio] objeto no cargado:', r.reason));
-    setHud(`${objects.length} objetos`, true);
+  try {
+    if (selection.length === 0) {
+      spawnFallback();
+      setHud('sin resultados — muestra de prueba', true);
+    } else {
+      setHud(`cargando 0 / ${selection.length}`);
+      let loaded = 0;
+      const results = await Promise.allSettled(
+        selection.map((meta, i) =>
+          loadObject(meta, i, selection.length).then(() => {
+            loaded++;
+            setHud(`cargando ${loaded} / ${selection.length}`);
+          })
+        )
+      );
+      results
+        .filter(r => r.status === 'rejected')
+        .forEach(r => console.warn('[espacio] objeto no cargado:', r.reason));
+      setHud(`${objects.length} objetos`, true);
+    }
+  } finally {
+    if (loader) loader.classList.remove('on'); // se oculta pase lo que pase
   }
-  if (loader) loader.classList.remove('on');
 
   // Efectos de escena
   if (!reducedMotion) {
@@ -469,13 +472,9 @@ function animate() {
 
   for (const o of objects) {
     if (o.controller) o.controller.update(dt, t);
-    // Los textos miran a cámara con temblor, tras el movimiento traslacional
+    // Los textos miran a cámara (plano, quieto) tras el movimiento traslacional
     if (o.root.userData.billboard) {
       updateBillboard(o.root, camera, t, o.root.userData.seed ?? 0);
-    }
-    // Opacidad de texto según relación con el entorno (suavizado por frame)
-    if (o.root.userData.setRelationOpacity) {
-      o.root.userData.setRelationOpacity(o.root.userData._relRatio ?? 0);
     }
   }
 

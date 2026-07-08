@@ -68,8 +68,11 @@ export async function buildImage(url, meta) {
 }
 
 // ============================================================
-// TEXTO — billboard que duda (VERSIÓN ALTA NITIDEZ)
+// TEXTO — billboard que duda
 // ============================================================
+// Se rasteriza a textura sobre canvas (control tipográfico total, sin cargar
+// fuentes externas). El plano mira a cámara SIEMPRE, pero con temblor de
+// posición y una desalineación de rotación que nunca se corrige del todo.
 export function buildText(meta) {
   const text = meta.text ?? '';
   const fontSize = meta.fontSize ?? 64;
@@ -89,15 +92,15 @@ export function buildText(meta) {
   );
   group.add(mesh);
 
+  // Rasteriza el texto a textura. `bold` es el conjunto de palabras (en
+  // minúscula, sin acentos) a poner en negrita — las que resuenan con el
+  // entorno. Re-render solo cuando ese conjunto cambia.
   const norm = w => w.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w]/g, '');
-  
   function render(boldSet) {
     const lines = text.split('\n');
-    
-    // 1. FORZAR ALTA RESOLUCIÓN: Sobrescalamos el canvas para máxima nitidez
-    const baseDpr = window.devicePixelRatio || 1;
-    const renderScale = Math.max(baseDpr, 2) * 2.5; // Multiplicador de super-sampling
-    
+    // Renderizamos a ALTA resolución (supersampling) para que el texto quede
+    // nítido sobre negro. dpr real x2 de refuerzo → sin difuminado.
+    const dpr = Math.min(window.devicePixelRatio || 1, 2) * 2;
     const measure = document.createElement('canvas').getContext('2d');
     const fontOf = (w) => `${w} ${fontSize}px ${family}`;
     measure.font = fontOf(weight);
@@ -114,17 +117,10 @@ export function buildText(meta) {
 
     const cw = Math.ceil(textW + pad * 2);
     const ch = Math.ceil(lineH * lines.length + pad * 2);
-    
     const canvas = document.createElement('canvas');
-    canvas.width = Math.ceil(cw * renderScale); 
-    canvas.height = Math.ceil(ch * renderScale);
+    canvas.width = cw * dpr; canvas.height = ch * dpr;
     const ctx = canvas.getContext('2d');
-    
-    // Suavizado nativo del canvas activado explícitamente
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    
-    ctx.scale(renderScale, renderScale);
+    ctx.scale(dpr, dpr);
     ctx.textBaseline = 'top';
     ctx.textAlign = 'left';
 
@@ -134,24 +130,17 @@ export function buildText(meta) {
       for (const word of l.split(' ')) {
         const isBold = boldSet?.has(norm(word));
         ctx.font = fontOf(isBold ? 700 : weight);
-        ctx.fillStyle = isBold ? '#ffffff' : color; 
-        
-        // 2. PIXEL SNAPPING: Redondear x e y elimina el sub-pixel blurring
-        ctx.fillText(word + ' ', Math.round(x), Math.round(y));
-        
+        ctx.fillStyle = isBold ? '#ffffff' : color;
+        ctx.fillText(word + ' ', x, y);
         x += ctx.measureText(word + ' ').width;
       }
     });
 
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
-    
-    // 3. FILTROS Y MIPMAPS: Crucial para la nitidez en movimiento/distancia
+    tex.anisotropy = 8;
+    tex.minFilter = THREE.LinearMipmapLinearFilter; // nitidez con mipmaps
     tex.generateMipmaps = true;
-    tex.minFilter = THREE.LinearMipmapLinearFilter; // Suavidad en la distancia
-    tex.magFilter = THREE.LinearFilter;             // Nitidez de cerca
-    tex.anisotropy = 16;                            // Máxima calidad en ángulos oblicuos
-
     if (mesh.material.map) mesh.material.map.dispose();
     mesh.material.map = tex;
     mesh.material.needsUpdate = true;
@@ -161,26 +150,23 @@ export function buildText(meta) {
     mesh.geometry = new THREE.PlaneGeometry(worldH * (cw / ch), worldH);
   }
 
-  render(null); 
+  render(null); // render inicial sin negritas
 
   group.userData.isText = true;
   group.userData.billboard = true;
   group.userData.textPlane = mesh;
+  // palabras del texto (normalizadas) y API de resaltado para el coordinador
   group.userData.words = new Set(text.split(/\s+/).map(norm).filter(Boolean));
   group.userData._boldKey = '';
   group.userData.highlight = (boldSet) => {
     const key = [...boldSet].sort().join(',');
-    if (key === group.userData._boldKey) return; 
+    if (key === group.userData._boldKey) return; // sin cambios, no re-render
     group.userData._boldKey = key;
     render(boldSet);
   };
-  group.userData.baseOpacity = meta.opacity ?? 0.9;
-  group.userData.minOpacity = meta.minOpacity ?? 0.35;
-  group.userData.setRelationOpacity = (ratio) => {
-    const target = group.userData.minOpacity +
-      (group.userData.baseOpacity - group.userData.minOpacity) * Math.min(ratio * 2, 1);
-    mesh.material.opacity += (target - mesh.material.opacity) * 0.1; 
-  };
+  // El texto mantiene su opacidad SIEMPRE (antes bajaba por falta de relación
+  // y quedaba invisible). La relación con el entorno se expresa solo en las
+  // palabras que se ponen en negrita, no atenuando el bloque entero.
   return group;
 }
 
@@ -191,121 +177,149 @@ export function buildText(meta) {
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
 export function updateBillboard(group, camera, t, seed) {
+  // Mirar a cámara, plano y quieto. Cualquier inclinación añade shimmer que
+  // dificulta la lectura; el texto debe estar perfectamente frontal. La
+  // "vida" del texto es su lenta deriva de posición (bucle), no rotación.
   group.quaternion.copy(camera.quaternion);
-  // Inclinación residual mínima: el texto debe permanecer NÍTIDO y legible.
-  // Una micro-oscilación lenta alrededor del frontal, sin componente rápida
-  // que cizalle o rompa la lectura. La vibración perceptible del texto es su
-  // ligera deriva de posición (jitter suave), no la deformación del plano.
-  const tilt = 0.003;
-  const rx = Math.sin(t * 0.17 + seed) * tilt;
-  const ry = Math.cos(t * 0.14 + seed * 1.3) * tilt;
-  _e.set(rx, ry, 0);
-  _q.setFromEuler(_e);
-  group.quaternion.multiply(_q);
 }
 
 // ============================================================
 // LÍNEAS DE CONEXIÓN — intermitentes, finas
 // ============================================================
-// Un pool fijo de segmentos que aparecen y desaparecen entre pares de
-// elementos cercanos. No permanentes: parpadean como sinapsis.
+// ============================================================
+// CONEXIONES — puntos viajeros
+// En vez de líneas dibujadas, pequeños puntos que de vez en cuando viajan en
+// línea recta de un objeto a otro relacionado. Una señal que se transmite,
+// no un vínculo permanente. Discretos, ocasionales.
+// ============================================================
 export class ConnectionLines {
   constructor(scene, opts = {}) {
-    this.max = opts.max ?? 12;
-    this.color = new THREE.Color(opts.color ?? 0x9c93b8);
-    this.maxDist = opts.maxDist ?? 5.5;      // solo conecta elementos cercanos
-    this.spawnChance = opts.spawnChance ?? 0.4; // prob/seg de nueva conexión
-    this.life = opts.life ?? [1.5, 4];        // duración de cada línea (s)
+    this.scene = scene;
+    this.max = opts.max ?? 10;                 // puntos simultáneos como máximo
+    this.color = new THREE.Color(opts.color ?? 0xb9aee0);
+    this.speed = opts.speed ?? 3.2;            // unidades/seg del viaje
+    this.spawnEvery = opts.spawnEvery ?? 0.9;  // s entre intentos de emisión
+    this.spawnChance = opts.spawnChance ?? 0.5;
+    this.dotSize = opts.dotSize ?? 0.06;
+    this.trailDots = opts.trailDots ?? 3;      // pequeña cola de puntos detrás
 
-    const positions = new Float32Array(this.max * 2 * 3);
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    this.geo = geo;
-    const mat = new THREE.LineBasicMaterial({
-      color: this.color, transparent: true, opacity: 0.0,
-      depthWrite: false, blending: THREE.AdditiveBlending,
-    });
-    // Cada línea es su propio objeto para poder darle alfa individual
-    this.lines = [];
+    // pool de puntos viajeros; cada uno es un sprite pequeño
+    this.tex = makeDotTexture(this.color);
+    this.travelers = [];
     for (let i = 0; i < this.max; i++) {
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
-      const m = new THREE.LineBasicMaterial({
-        color: this.color, transparent: true, opacity: 0,
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: this.tex, transparent: true, opacity: 0,
         depthWrite: false, blending: THREE.AdditiveBlending,
-      });
-      const line = new THREE.Line(g, m);
-      line.frustumCulled = false;
-      line.visible = false;
-      scene.add(line);
-      this.lines.push({ line, a: null, b: null, age: 0, life: 0 });
+      }));
+      sprite.scale.setScalar(this.dotSize);
+      sprite.visible = false;
+      scene.add(sprite);
+      // cola: puntitos más pequeños y tenues que siguen al principal
+      const tail = [];
+      for (let k = 0; k < this.trailDots; k++) {
+        const ts = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: this.tex, transparent: true, opacity: 0,
+          depthWrite: false, blending: THREE.AdditiveBlending,
+        }));
+        ts.scale.setScalar(this.dotSize * (0.7 - k * 0.15));
+        ts.visible = false;
+        scene.add(ts);
+        tail.push(ts);
+      }
+      this.travelers.push({ sprite, tail, a: null, b: null, t: 0, dur: 0, history: [] });
     }
     this._acc = 0;
+    this.pairs = null;
   }
 
   update(dt, objects) {
-    // Envejecer y actualizar posiciones de las activas
-    for (const slot of this.lines) {
-      if (!slot.a) continue;
-      // si alguno de los extremos ya no está en escena, matar la línea
-      if (!slot.a.parent || !slot.b.parent) {
-        slot.a = slot.b = null; slot.line.visible = false; continue;
-      }
-      slot.age += dt;
-      const p = slot.age / slot.life;
-      if (p >= 1) { slot.a = slot.b = null; slot.line.visible = false; continue; }
-      // Envolvente suave, alfa máx reducido (antes 0.5 → líneas demasiado presentes)
-      slot.line.material.opacity = Math.sin(p * Math.PI) * 0.22;
-      const arr = slot.line.geometry.attributes.position.array;
-      slot.a.getWorldPosition(_tmpA);
-      slot.b.getWorldPosition(_tmpB);
-      arr[0] = _tmpA.x; arr[1] = _tmpA.y; arr[2] = _tmpA.z;
-      arr[3] = _tmpB.x; arr[4] = _tmpB.y; arr[5] = _tmpB.z;
-      slot.line.geometry.attributes.position.needsUpdate = true;
+    for (const tr of this.travelers) {
+      if (!tr.a) continue;
+      if (!tr.a.parent || !tr.b.parent) { this._retire(tr); continue; }
+      tr.t += dt / tr.dur;
+      if (tr.t >= 1) { this._retire(tr); continue; }
+
+      tr.a.getWorldPosition(_tmpA);
+      tr.b.getWorldPosition(_tmpB);
+      _tmpC.lerpVectors(_tmpA, _tmpB, tr.t);
+      tr.sprite.position.copy(_tmpC);
+      // fundido de entrada/salida
+      const fade = Math.sin(tr.t * Math.PI);
+      tr.sprite.material.opacity = fade * 0.9;
+
+      // cola: posiciones pasadas
+      tr.history.unshift(_tmpC.clone());
+      if (tr.history.length > tr.tail.length) tr.history.pop();
+      tr.tail.forEach((ts, k) => {
+        const h = tr.history[k];
+        if (h) { ts.position.copy(h); ts.material.opacity = fade * 0.5 * (1 - k / tr.tail.length); ts.visible = true; }
+      });
     }
-    // Intentar crear nuevas
+
     this._acc += dt;
-    if (this._acc > 0.25 && objects.length >= 2) {
+    if (this._acc > this.spawnEvery && objects.length >= 2) {
       this._acc = 0;
-      if (Math.random() < this.spawnChance) this._trySpawn(objects);
+      if (Math.random() < this.spawnChance) this._emit();
     }
   }
 
-  _trySpawn(objects) {
-    // Solo conectamos por AFINIDAD de tags. Sin pares afines, no hay líneas
-    // (el fallback de proximidad tendía a unir textos vecinos permanentemente).
+  _emit() {
     if (!this.pairs || !this.pairs.length) return;
-    const free = this.lines.find(s => !s.a);
-    if (!free) return;
-    // ruleta ponderada por afinidad
+    const tr = this.travelers.find(t => !t.a);
+    if (!tr) return;
     let total = 0;
     for (const p of this.pairs) total += p.w;
     let r = Math.random() * total;
     let chosen = this.pairs[0];
     for (const p of this.pairs) { r -= p.w; if (r <= 0) { chosen = p; break; } }
-    // no conectar si algún extremo ya no está en escena
     if (!chosen.a.parent || !chosen.b.parent) return;
-    free.a = chosen.a; free.b = chosen.b;
-    free.age = 0;
-    free.life = this.life[0] + Math.random() * (this.life[1] - this.life[0]);
-    free.line.visible = true;
+    // dirección aleatoria del viaje (a→b o b→a)
+    if (Math.random() < 0.5) { tr.a = chosen.a; tr.b = chosen.b; }
+    else { tr.a = chosen.b; tr.b = chosen.a; }
+    tr.a.getWorldPosition(_tmpA);
+    tr.b.getWorldPosition(_tmpB);
+    tr.dur = Math.max(0.3, _tmpA.distanceTo(_tmpB) / this.speed);
+    tr.t = 0;
+    tr.history = [];
+    tr.sprite.visible = true;
+  }
+
+  _retire(tr) {
+    tr.a = tr.b = null;
+    tr.sprite.visible = false;
+    tr.sprite.material.opacity = 0;
+    tr.tail.forEach(ts => { ts.visible = false; ts.material.opacity = 0; });
+    tr.history = [];
   }
 
   setPairs(pairs) { this.pairs = pairs; }
 
-  // Soltar todas las líneas activas y limpiar pares (al reconstruir escena).
   reset() {
-    for (const slot of this.lines) {
-      slot.a = slot.b = null;
-      slot.age = 0;
-      slot.line.visible = false;
-      slot.line.material.opacity = 0;
-    }
+    for (const tr of this.travelers) this._retire(tr);
     this.pairs = null;
   }
 }
 const _tmpA = new THREE.Vector3();
 const _tmpB = new THREE.Vector3();
+const _tmpC = new THREE.Vector3();
+
+// Textura de punto suave (disco con halo) para los viajeros.
+function makeDotTexture(color) {
+  const s = 32;
+  const c = document.createElement('canvas');
+  c.width = c.height = s;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2);
+  const hex = '#' + color.getHexString();
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.3, hex);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, s, s);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
 
 // ============================================================
 // ESTELA — feedback suave de posición
@@ -316,9 +330,9 @@ export class Trails {
   constructor(scene, opts = {}) {
     this.scene = scene;
     this.every = opts.every ?? 0.14;      // s entre muestras (algo más denso)
-    this.life = opts.life ?? 1.0;         // vida de cada eco (más larga → estela más visible)
-    this.maxOpacity = opts.maxOpacity ?? 0.05;
-    this.printOpacity = opts.printOpacity ?? 0.15; // huella de 3D más presente
+    this.life = opts.life ?? 1.9;         // vida de cada eco (más larga → estela más visible)
+    this.maxOpacity = opts.maxOpacity ?? 0.16;
+    this.printOpacity = opts.printOpacity ?? 0.20; // huella de 3D más presente
     this.samples = [];                    // { mesh, age, base }
     this._acc = 0;
     this._softTex = makeSoftDiscTexture(); // gradiente radial compartido
