@@ -1,0 +1,18 @@
+{
+  "tags": [
+    "plastilina",
+    "entidad",
+    "extraño",
+    "IA"
+  ],
+  "scale": 1,
+  "backOpacity": 0.22,
+  "movement": {
+    "base": {
+      "type": "bucle",
+      "period": 45,
+      "radius": 1.5,
+      "mutation": 0.14
+    }
+  }
+}
