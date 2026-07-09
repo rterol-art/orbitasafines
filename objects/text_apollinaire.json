@@ -1,0 +1,22 @@
+{
+  "tags": [
+    "palíndromo",
+    "noche",
+    "paseo",
+    "compañía",
+    "divagar",
+    "rumbo"
+  ],
+  "text": "Damos vueltas toda la noche\ny el fuego nos consume",
+  "size": 0.7,
+  "weight": 300,
+  "opacity": 0.9,
+  "movement": {
+    "base": {
+      "type": "bucle",
+      "period": 50,
+      "radius": 2.9,
+      "mutation": 0.04
+    }
+  }
+}
