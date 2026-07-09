@@ -184,10 +184,7 @@ export function updateBillboard(group, camera, t, seed) {
 }
 
 // ============================================================
-// LÍNEAS DE CONEXIÓN — intermitentes, finas
-// ============================================================
-// ============================================================
-// CONEXIONES — puntos viajeros
+// CONEXIONES — puntos viajeros (Sin texto flotante)
 // En vez de líneas dibujadas, pequeños puntos que de vez en cuando viajan en
 // línea recta de un objeto a otro relacionado. Una señal que se transmite,
 // no un vínculo permanente. Discretos, ocasionales.
@@ -213,7 +210,8 @@ export class ConnectionLines {
       }));
       sprite.scale.setScalar(this.dotSize);
       sprite.visible = false;
-      scene.add(sprite);
+      this.scene.add(sprite);
+      
       // cola: puntitos más pequeños y tenues que siguen al principal
       const tail = [];
       for (let k = 0; k < this.trailDots; k++) {
@@ -223,14 +221,13 @@ export class ConnectionLines {
         }));
         ts.scale.setScalar(this.dotSize * (0.7 - k * 0.15));
         ts.visible = false;
-        scene.add(ts);
+        this.scene.add(ts);
         tail.push(ts);
       }
-      this.travelers.push({ sprite, tail, word: null, wordCache: {}, a: null, b: null, t: 0, dur: 0, history: [] });
+      this.travelers.push({ sprite, tail, a: null, b: null, t: 0, dur: 0, history: [] });
     }
     this._acc = 0;
     this.pairs = null;
-    this.showConcept = opts.showConcept ?? 0.4; // prob. de que el viaje muestre el concepto
   }
 
   update(dt, objects) {
@@ -251,15 +248,12 @@ export class ConnectionLines {
       if (tr.history.length > tr.tail.length) tr.history.pop();
       tr.tail.forEach((ts, k) => {
         const h = tr.history[k];
-        if (h) { ts.position.copy(h); ts.material.opacity = fade * 0.5 * (1 - k / tr.tail.length); ts.visible = true; }
+        if (h) { 
+          ts.position.copy(h); 
+          ts.material.opacity = fade * 0.5 * (1 - k / tr.tail.length); 
+          ts.visible = true; 
+        }
       });
-
-      // el concepto compartido aflora en el trayecto, algo por delante del punto
-      if (tr.word) {
-        tr.word.position.copy(_tmpC).y += 0.12;
-        tr.word.material.opacity = fade * 0.5; // tenue: niebla, no etiqueta
-        tr.word.visible = true;
-      }
     }
 
     this._acc += dt;
@@ -273,28 +267,23 @@ export class ConnectionLines {
     if (!this.pairs || !this.pairs.length) return;
     const tr = this.travelers.find(t => !t.a);
     if (!tr) return;
+    
     let total = 0;
     for (const p of this.pairs) total += p.w;
     let r = Math.random() * total;
     let chosen = this.pairs[0];
     for (const p of this.pairs) { r -= p.w; if (r <= 0) { chosen = p; break; } }
+    
     if (!chosen.a.parent || !chosen.b.parent) return;
     if (Math.random() < 0.5) { tr.a = chosen.a; tr.b = chosen.b; }
     else { tr.a = chosen.b; tr.b = chosen.a; }
+    
     tr.a.getWorldPosition(_tmpA);
     tr.b.getWorldPosition(_tmpB);
     tr.dur = Math.max(0.3, _tmpA.distanceTo(_tmpB) / this.speed);
     tr.t = 0;
     tr.history = [];
     tr.sprite.visible = true;
-
-    // ¿mostrar el concepto que los une? A veces, uno de los tags compartidos.
-    if (tr.word) { this.scene.remove(tr.word); tr.word.material.map?.dispose(); tr.word.material.dispose(); tr.word = null; }
-    if (chosen.shared?.length && Math.random() < this.showConcept) {
-      const concept = chosen.shared[Math.floor(Math.random() * chosen.shared.length)];
-      tr.word = makeWordSprite(concept, this.color);
-      this.scene.add(tr.word);
-    }
   }
 
   _retire(tr) {
@@ -303,7 +292,6 @@ export class ConnectionLines {
     tr.sprite.material.opacity = 0;
     tr.tail.forEach(ts => { ts.visible = false; ts.material.opacity = 0; });
     tr.history = [];
-    if (tr.word) { tr.word.visible = false; tr.word.material.opacity = 0; }
   }
 
   setPairs(pairs) { this.pairs = pairs; }
@@ -311,7 +299,6 @@ export class ConnectionLines {
   reset() {
     for (const tr of this.travelers) {
       this._retire(tr);
-      if (tr.word) { this.scene.remove(tr.word); tr.word.material.map?.dispose(); tr.word.material.dispose(); tr.word = null; }
     }
     this.pairs = null;
   }
@@ -319,36 +306,6 @@ export class ConnectionLines {
 const _tmpA = new THREE.Vector3();
 const _tmpB = new THREE.Vector3();
 const _tmpC = new THREE.Vector3();
-
-// Sprite de palabra tenue: el concepto compartido que aflora en el trayecto.
-function makeWordSprite(word, color) {
-  const fontSize = 44;
-  const pad = 10;
-  const measure = document.createElement('canvas').getContext('2d');
-  measure.font = `300 ${fontSize}px ui-monospace, monospace`;
-  const w = Math.ceil(measure.measureText(word).width) + pad * 2;
-  const h = fontSize + pad * 2;
-  const dpr = Math.min(window.devicePixelRatio || 1, 2) * 2;
-  const c = document.createElement('canvas');
-  c.width = w * dpr; c.height = h * dpr;
-  const ctx = c.getContext('2d');
-  ctx.scale(dpr, dpr);
-  ctx.font = `300 ${fontSize}px ui-monospace, monospace`;
-  ctx.fillStyle = '#' + color.getHexString();
-  ctx.textBaseline = 'middle';
-  ctx.textAlign = 'center';
-  ctx.fillText(word, w / 2, h / 2);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: tex, transparent: true, opacity: 0, depthWrite: false,
-  }));
-  const worldH = 0.28;
-  sprite.scale.set(worldH * (w / h), worldH, 1);
-  sprite.visible = false;
-  return sprite;
-}
 
 // Textura de punto suave (disco con halo) para los viajeros.
 function makeDotTexture(color) {
