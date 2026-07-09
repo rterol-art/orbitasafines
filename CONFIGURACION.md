@@ -451,3 +451,30 @@ pulsas "azar" (limpia todo y reconstruye), o pulsas Enter con el buscador vacío
 
 Al soltar el foco, los objetos que se habían acercado vuelven poco a poco a sus
 hogares — la relajación es progresiva, no un salto.
+
+---
+
+## v17 — sistema de invocación con relevancia continua
+
+Cambio profundo de la lectura de la obra. Los objetos son democráticamente
+iguales. Los efectos ya no vienen grabados en su JSON: emergen de su
+RELACIÓN con lo invocado.
+
+**Cómo funciona:**
+- El buscador o el azar invocan UN objeto como central (relevancia=1).
+- Sus tags irradian por co-ocurrencia semántica al resto de objetos, dando
+  a cada uno una relevancia continua entre 0 y 1.
+- El tag buscado explícitamente pesa más que los otros del central.
+- Los efectos leen la relevancia: nítido cerca, borroso lejos (mucha estela).
+- Las posiciones también: los relevantes se pegan al central, el fondo flota lejos.
+
+**Democracia:**
+- Eliminado `avoid` — no hay tags que un objeto rechace. La distancia semántica
+  ya modula la lectura.
+- Los JSON existentes siguen funcionando (los parámetros de efectos son
+  ignorados; se aplica una base uniforme modulada por relevancia).
+
+**Todavía por hacer** en próximas versiones:
+- Modular jitter, respiración, deshielo, costura por relevancia (ahora solo
+  la ESTELA responde plenamente).
+- Simplificar el panel de admin: quitar sliders de efectos que ya no importan.

@@ -10,8 +10,10 @@ import * as THREE from 'three';
 
 // ---------- Afinidad entre dos objetos ----------
 // Los TAGS principales pesan fuerte; los EXPAND (sinónimos) pesan poco —
-// dan relación ligera sin colapsar el grafo. Con signo: los tags en la
-// lista `avoid` del otro restan (afinidad negativa → repulsión y pinchos).
+// dan relación ligera sin colapsar el grafo. Sin negatividad: todos los
+// objetos son democráticamente iguales, no hay rechazo declarado.
+// La distancia semántica ya modula la lectura (más lejos = más borroso);
+// no hace falta un mecanismo aparte de "enemistad".
 const EXPAND_WEIGHT = 0.25; // un match de sinónimo vale 1/4 de un tag principal
 
 export function affinity(a, b) {
@@ -26,20 +28,10 @@ export function affinity(a, b) {
   let softShared = 0;
   if (expA.length || expB.length) {
     const allB = new Set([...tagsB, ...expB]);
-    const allA = new Set([...tagsA, ...expA]);
     for (const t of expA) if (allB.has(t)) softShared++;
     for (const t of tagsA) if (expB.includes(t)) softShared++;
   }
-  const pos = (shared + softShared * EXPAND_WEIGHT) / Math.min(tagsA.length, tagsB.length);
-
-  // exclusión
-  const avoidA = a.avoid ?? [], avoidB = b.avoid ?? [];
-  let conflict = 0;
-  if (avoidA.length) { const s = new Set(avoidA); for (const t of tagsB) if (s.has(t)) conflict++; }
-  if (avoidB.length) { const s = new Set(avoidB); for (const t of tagsA) if (s.has(t)) conflict++; }
-  const neg = conflict > 0 ? conflict / Math.min(tagsA.length, tagsB.length) : 0;
-
-  return Math.max(-1, Math.min(1, pos - neg));
+  return Math.min(1, (shared + softShared * EXPAND_WEIGHT) / Math.min(tagsA.length, tagsB.length));
 }
 
 // ============================================================
@@ -58,13 +50,17 @@ export class RelationField {
         root: o.root,
         tags: (o.meta.tags ?? []),
         expand: (o.meta.expand ?? []),
-        avoid: (o.meta.avoid ?? []),
         anchor,
         home: anchor.clone(),
         vel: new THREE.Vector3(),
         controller: o.controller,
         prox: o.controller?.proximity ?? null,
-        totalRel: 0,   // suma de afinidades positivas con el resto (se calcula abajo)
+        totalRel: 0,
+        // Relevancia respecto a la invocación actual (0..1). Sin invocación,
+        // todos a 1 (democracia total). Con invocación, el central=1 y el resto
+        // decae continuamente según su afinidad semántica con lo invocado.
+        // Es la lectura visual del objeto: 1=nítido, 0=fantasmal.
+        relevance: 1,
       };
     });
 
@@ -101,26 +97,106 @@ export class RelationField {
     this._pt = new THREE.Vector3();
     this._colliding = new Set();
 
-    // Foco de búsqueda: cuando activo, los nodos marcados en `matched`
-    // se atraen al punto `focusPoint`; los no marcados son ligeramente
-    // empujados hacia afuera. Se desactiva poniendo focusActive=false.
-    this.focusActive = false;
-    this.focusPoint = new THREE.Vector3(0, 0, 0);
-    this.matched = new Set();       // set de root.uuid de objetos coincidentes
-    this.focusPull = opts.focusPull ?? 0.9;   // atracción de los coincidentes al foco
-    this.focusPush = opts.focusPush ?? 0.25;  // empujón de los NO coincidentes hacia afuera
+    // Sistema de invocación. Al invocar (search o azar) un objeto se vuelve
+    // "central" y todos los demás reciben una relevancia (0..1) según su
+    // afinidad semántica con lo invocado. La escena no filtra: todo sigue,
+    // pero la relevancia modula posición, estela y demás efectos —lo lejano
+    // se lee como fantasmal, lo cercano como nítido.
+    this.central = null;            // nodo central invocado
+    this.searchedTag = null;        // tag específicamente buscado (pesa más)
+    this.invokePull = opts.invokePull ?? 0.6;   // atrae al central a los relevantes
+    this.backgroundRadius = opts.backgroundRadius ?? 8; // radio del fondo lejano
+    // matriz de co-ocurrencia de tags: cooc[T1][T2] = con qué frecuencia
+    // co-aparecen en el mismo objeto del catálogo. Permite que un tag
+    // "invoque" a otros semánticamente cercanos aunque no sean idénticos.
+    this._buildCooccurrence();
   }
 
-  // Activa el modo búsqueda: agrupa los objetos "matched" alrededor de "point"
-  // sin ocultar el resto. matchedRoots = array de root de Three de los coincidentes.
-  setFocus(matchedRoots, point) {
-    this.matched = new Set(matchedRoots.map(r => r.uuid));
-    this.focusPoint.copy(point);
-    this.focusActive = true;
+  // Construye la matriz de co-ocurrencia de tags a partir de los propios objetos
+  // de la escena. Cuanto más co-aparecen dos tags en distintos objetos, más
+  // "cerca" están semánticamente. Es lo que permite que la relevancia se
+  // propague continuamente por el grafo conceptual sin escalones discretos.
+  _buildCooccurrence() {
+    const counts = new Map();      // Map<tag, Map<tag, count>>
+    const totals = new Map();      // Map<tag, count>
+    for (const n of this.nodes) {
+      const T = n.tags;
+      for (const t of T) totals.set(t, (totals.get(t) || 0) + 1);
+      for (let i = 0; i < T.length; i++) {
+        for (let j = 0; j < T.length; j++) {
+          if (i === j) continue;
+          if (!counts.has(T[i])) counts.set(T[i], new Map());
+          counts.get(T[i]).set(T[j], (counts.get(T[i]).get(T[j]) || 0) + 1);
+        }
+      }
+    }
+    // Normalizar: cooc(A,B) = count(A,B) / count(A). Da la probabilidad de
+    // que B aparezca dado A. Asimétrico a propósito.
+    this.cooc = new Map();
+    for (const [a, m] of counts) {
+      const denom = totals.get(a) || 1;
+      const norm = new Map();
+      for (const [b, c] of m) norm.set(b, c / denom);
+      this.cooc.set(a, norm);
+    }
   }
-  clearFocus() {
-    this.matched.clear();
-    this.focusActive = false;
+
+  // Invocar un objeto como central. searchedTag es opcional: si viene, ese
+  // tag pesa más que los otros del central en la propagación de relevancia.
+  invoke(centralRoot, searchedTag = null) {
+    this.central = this.nodes.find(n => n.root === centralRoot) || null;
+    this.searchedTag = searchedTag;
+    this._recomputeRelevance();
+  }
+
+  clearInvocation() {
+    this.central = null;
+    this.searchedTag = null;
+    for (const n of this.nodes) n.relevance = 1; // democracia
+  }
+
+  _recomputeRelevance() {
+    if (!this.central) {
+      for (const n of this.nodes) n.relevance = 1;
+      return;
+    }
+    // Vector de pesos de la invocación: qué tags pesan y cuánto.
+    // El tag buscado explícitamente (searchedTag) pesa 1.0.
+    // Los demás tags del central pesan 0.6.
+    const weights = new Map();
+    for (const t of this.central.tags) {
+      weights.set(t, t === this.searchedTag ? 1.0 : 0.6);
+    }
+    if (this.searchedTag && !weights.has(this.searchedTag)) {
+      weights.set(this.searchedTag, 1.0);
+    }
+    let maxW = 0;
+    for (const w of weights.values()) maxW += w;
+    if (maxW === 0) maxW = 1;
+
+    for (const n of this.nodes) {
+      if (n === this.central) { n.relevance = 1; continue; }
+      let score = 0;
+      for (const [T, w] of weights) {
+        // Hit directo: el objeto tiene este tag
+        if (n.tags.includes(T)) { score += w; continue; }
+        // Hit indirecto vía co-ocurrencia: alguno de los tags del objeto
+        // co-aparece con T en el catálogo. Tomamos el máximo.
+        let maxCooc = 0;
+        const coocT = this.cooc.get(T);
+        if (coocT) {
+          for (const T2 of n.tags) {
+            const c = coocT.get(T2) || 0;
+            if (c > maxCooc) maxCooc = c;
+          }
+        }
+        // Decay: la relevancia indirecta pesa menos que la directa
+        score += w * maxCooc * 0.7;
+      }
+      // Suelo mínimo 0.08: los ajenos siguen ahí, muy borrosos y lejanos
+      // (fondo), pero nunca desaparecen. Techo 1 por seguridad.
+      n.relevance = Math.max(0.08, Math.min(1, score / maxW));
+    }
   }
 
   // Algunos objetos orbitan a OTRO objeto en vez de a un punto fijo: los que
@@ -222,35 +298,11 @@ export class RelationField {
         ni.home.copy(nt.anchor).add(ni._orbitOffset);
       }
 
-      // Resorte suave de regreso al hogar (evita fuga del encuadre)
+      // Resorte suave de regreso al hogar. Durante invocación se debilita
+      // para que la invocación pueda desplazar el ancla.
       this._d.subVectors(ni.home, ni.anchor);
-      // durante la búsqueda, los NO coincidentes tienen homePull reducido
-      // para que el empuje del foco pueda alejarlos un poco de su hogar
-      const homeMul = (this.focusActive && !this.matched.has(ni.root.uuid)) ? 0.35 : 1;
+      const homeMul = this.central ? 0.1 : 1;
       this._f.addScaledVector(this._d, this.homePull * homeMul * (ni._orbitTarget >= 0 ? 2.5 : 1));
-
-      // Foco de búsqueda: coincidentes tiran al punto foco, no coincidentes
-      // son empujados suavemente hacia afuera. No oculta a nadie.
-      if (this.focusActive) {
-        if (this.matched.has(ni.root.uuid)) {
-          this._d.subVectors(this.focusPoint, ni.anchor);
-          const dist = this._d.length();
-          if (dist > 0.001) {
-            this._d.divideScalar(dist);
-            const strength = this.focusPull * Math.min(dist, 5) * 0.4;
-            this._f.addScaledVector(this._d, strength);
-          }
-        } else {
-          this._d.subVectors(ni.anchor, this.focusPoint);
-          const dist = this._d.length();
-          if (dist > 0.001) {
-            this._d.divideScalar(dist);
-            // constante hasta cierta distancia; decae solo cuando ya están lejos
-            const strength = this.focusPush * (dist < 6 ? 1 : 6 / dist);
-            this._f.addScaledVector(this._d, strength);
-          }
-        }
-      }
 
       if (this._f.length() > this.maxForce) this._f.setLength(this.maxForce);
       ni.vel.addScaledVector(this._f, h);
@@ -261,6 +313,30 @@ export class RelationField {
     // alrededor de este centro que ahora deriva por afinidad semántica.
     for (const ni of this.nodes) {
       ni.anchor.addScaledVector(ni.vel, h);
+    }
+
+    // Invocación: tras la integración de las fuerzas, el ancla de cada objeto
+    // se desliza suavemente hacia su posición "invocada". Es un lerp directo
+    // para no luchar con maxForce ni con la cascada de resortes. La distancia
+    // deseada al central es función CONTINUA de la relevancia: los más
+    // relevantes se pegan al central, los ajenos se van al fondo (backgroundRadius).
+    // La velocidad del lerp también depende de la relevancia: lo relevante
+    // se posiciona rápido, lo ajeno deriva despacio.
+    if (this.central) {
+      const cPos = this.central.anchor;
+      for (const ni of this.nodes) {
+        if (ni === this.central) continue;
+        this._d.subVectors(ni.anchor, cPos);
+        const dist = this._d.length();
+        if (dist < 0.001) continue;
+        this._d.divideScalar(dist);
+        const desired = 0.8 + (1 - ni.relevance) * (this.backgroundRadius - 0.8);
+        this._pt.copy(cPos).addScaledVector(this._d, desired);
+        // Velocidad del acercamiento: alta para los relevantes (0.02),
+        // muy baja para el fondo (0.003) → los ajenos "flotan" hacia allá.
+        const speed = 0.003 + 0.017 * ni.relevance;
+        ni.anchor.lerp(this._pt, speed);
+      }
     }
 
     this._updateProximity();

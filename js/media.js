@@ -350,8 +350,11 @@ export class Trails {
           || (o.root.userData.isImage ? o.root.children[0] : null);
 
         if (plane && plane.material.map) {
-          // Eco de plano: clona su textura tal cual
-          this._emitPlaneEcho(o.root, plane, this.maxOpacity);
+          // Eco de plano: clona su textura tal cual. La opacidad se modula
+          // por relevancia: menos relevante = más eco (más borroso).
+          const relevance = o.root.userData.relevance ?? 1;
+          const relFactor = 0.15 + (1 - relevance) * 1.85;
+          this._emitPlaneEcho(o.root, plane, this.maxOpacity * relFactor);
         } else if (o.root.userData.isModel) {
           // Huella de silueta: disco suave con el color/tamaño cacheados
           this._emitFootprint(o.root, camera);
@@ -397,8 +400,13 @@ export class Trails {
       cache = computeFootprint(root);
       root.userData.footprint = cache;
     }
-    // intensidad por objeto: un objeto principal puede dejar más rastro
-    const op = this.printOpacity * (root.userData.trailStrength ?? 1);
+    // La ESTELA es lectura de la lejanía respecto a lo invocado. Cuanto menos
+    // relevante es el objeto (más lejos del central), más estela deja. Un
+    // objeto plenamente relevante casi no deja rastro; el fondo se convierte
+    // en niebla. Es un mapeo suave, no un salto.
+    const relevance = root.userData.relevance ?? 1;
+    const relFactor = 0.15 + (1 - relevance) * 1.85; // 0.15 (nítido) → 2.0 (fantasmal)
+    const op = this.printOpacity * (root.userData.trailStrength ?? 1) * relFactor;
     const echo = new THREE.Mesh(_discGeo, new THREE.MeshBasicMaterial({
       map: this._softTex, color: cache.color, transparent: true,
       opacity: op, depthWrite: false, side: THREE.DoubleSide,
@@ -406,7 +414,7 @@ export class Trails {
     }));
     root.getWorldPosition(echo.position);
     const r = cache.radius * (root.scale.x || 1);
-    echo.scale.setScalar(r * 2.4); // algo mayor que la silueta → estela más legible
+    echo.scale.setScalar(r * 2.4);
     if (camera) echo.quaternion.copy(camera.quaternion);
     this.scene.add(echo);
     this.samples.push({ mesh: echo, age: 0, base: op, billboard: true });

@@ -484,19 +484,40 @@ async function init() {
 
 // ---------- Buscador y azar ----------
 function randomize() {
-  // El azar reconstruye la escena y suelta cualquier foco de búsqueda activo.
-  if (relations) relations.clearFocus();
-  return populate([...catalog].sort(() => Math.random() - 0.5).slice(0, CONFIG.maxObjects));
+  // El azar reconstruye la escena y elige UN objeto al azar como central.
+  // Sin tag buscado: todos los tags del central pesan igual en la invocación.
+  if (relations) relations.clearInvocation();
+  return populate([...catalog].sort(() => Math.random() - 0.5).slice(0, CONFIG.maxObjects))
+    .then(() => {
+      if (relations && objects.length) {
+        const centralObj = objects[Math.floor(Math.random() * objects.length)];
+        relations.invoke(centralObj.root, null);
+        setHud(`invocado al azar — ${centralObj.meta.tags?.slice(0,3).join(' · ') || ''}`, true);
+      }
+    });
 }
 
-// Calcula un punto delante de la cámara para que la constelación buscada
-// se forme donde la mirada del visitante está apuntando.
-function focusPointInFrontOfCamera(distance = 4) {
-  const p = new THREE.Vector3();
-  const dir = new THREE.Vector3();
-  camera.getWorldDirection(dir);
-  p.copy(camera.position).addScaledVector(dir, distance);
-  return p;
+// Elige el mejor central para una frase de búsqueda: el objeto del catálogo
+// cuyos tags mejor casan con la frase, priorizando match directo en tags,
+// luego en expand, luego proximidad textual.
+function pickCentralFor(phrase, results) {
+  if (!results.length) return null;
+  const words = phrase.toLowerCase().split(/\s+/).filter(Boolean);
+  let best = null, bestScore = -1, bestHit = null;
+  for (const m of results) {
+    const tags = (m.tags || []).map(t => t.toLowerCase());
+    const expand = (m.expand || []).map(t => t.toLowerCase());
+    let score = 0, hitTag = null;
+    for (const w of words) {
+      if (tags.includes(w)) { score += 2; hitTag = hitTag || w; }
+      else if (expand.includes(w)) { score += 1; }
+      else {
+        for (const t of tags) if (t.includes(w) || w.includes(t)) { score += 1; hitTag = hitTag || t; break; }
+      }
+    }
+    if (score > bestScore) { best = m; bestScore = score; bestHit = hitTag; }
+  }
+  return { central: best, searchedTag: bestHit };
 }
 
 function setupSearch() {
@@ -508,49 +529,42 @@ function setupSearch() {
     if (e.key !== 'Enter') return;
     const phrase = input.value.trim();
     if (!phrase) {
-      // Enter vacío: soltar el foco sin reconstruir (mantiene la escena, solo
-      // deshace la reorganización).
-      if (relations) relations.clearFocus();
+      // Enter vacío: soltar la invocación (todos vuelven a relevancia 1).
+      if (relations) relations.clearInvocation();
       setHud(`${objects.length} objetos`, true);
       return;
     }
 
-    // Buscar en el CATÁLOGO ENTERO (no solo lo cargado): así podemos traer
-    // objetos coincidentes que no estén en escena actualmente, y reorganizar.
     const res = search(phrase, catalog, { max: CONFIG.maxObjects, fallback: 'none' });
 
-    // Rutas según qué encontramos:
-    // 1. Coincidencias TODAS ya en escena → reorganizar sin recargar.
-    // 2. Alguna coincidencia falta en escena → recargar cambiando la selección,
-    //    y aplicar el foco al terminar la carga.
-    // 3. Sin coincidencias → HUD lo dice, la escena no cambia ni se reorganiza.
     if (!res.objects.length) {
       setHud('nada respondió a esa frase', true);
-      if (relations) relations.clearFocus();
+      if (relations) relations.clearInvocation();
       return;
     }
 
-    const inScene = new Map(objects.map(o => [o.meta.file ?? o.meta.text, o.root]));
-    const matched = res.objects.map(m => inScene.get(m.file ?? m.text)).filter(Boolean);
-    const allInScene = matched.length === res.objects.length;
+    // Elegir el central: el mejor match. La búsqueda invoca UN objeto, no
+    // muchos. Ese objeto reorganiza el mundo a su alrededor por relevancia.
+    const pick = pickCentralFor(phrase, res.objects);
 
-    if (!allInScene) {
-      // Necesitamos recargar la escena para incluir los que faltan. Mezclamos:
-      // los coincidentes primero, luego rellenamos con otros del catálogo hasta
-      // el cap — así el resto sigue habitando el espacio.
-      const others = catalog.filter(m => !res.objects.includes(m))
+    const inScene = new Map(objects.map(o => [o.meta.file ?? o.meta.text, o.root]));
+    let centralRoot = inScene.get(pick.central.file ?? pick.central.text);
+
+    if (!centralRoot) {
+      // El central no está en escena: recargamos incluyéndolo (y algunos otros
+      // afines para que la constelación tenga cuerpo), y luego invocamos.
+      const others = catalog.filter(m => m !== pick.central)
         .sort(() => Math.random() - 0.5);
-      const selection = [...res.objects, ...others].slice(0, CONFIG.maxObjects);
+      const selection = [pick.central, ...others].slice(0, CONFIG.maxObjects);
       await populate(selection);
-      // tras populate hay nuevos roots; recalcular matches
       const inSceneNow = new Map(objects.map(o => [o.meta.file ?? o.meta.text, o.root]));
-      const matchedNow = res.objects.map(m => inSceneNow.get(m.file ?? m.text)).filter(Boolean);
-      if (relations) relations.setFocus(matchedNow, focusPointInFrontOfCamera());
-    } else {
-      // Todas las coincidencias ya están en escena: simplemente reorganizar.
-      if (relations) relations.setFocus(matched, focusPointInFrontOfCamera());
+      centralRoot = inSceneNow.get(pick.central.file ?? pick.central.text);
     }
-    setHud(`«${phrase}» · ${res.objects.length} coincid.`, true);
+
+    if (centralRoot && relations) {
+      relations.invoke(centralRoot, pick.searchedTag);
+      setHud(`«${phrase}» · centro: ${(pick.central.tags||[]).slice(0,3).join(' · ')}`, true);
+    }
   });
 }
 
@@ -601,7 +615,12 @@ function animate() {
   }
 
   // Fase 3: las fuerzas relacionales mueven los anclas de los bucles
-  if (relations) relations.update(dt);
+  if (relations) {
+    relations.update(dt);
+    // Publicar la relevancia de cada nodo a su root.userData para que las
+    // estelas y demás lectores visuales la usen sin acoplarse al RelationField.
+    for (const n of relations.nodes) n.root.userData.relevance = n.relevance;
+  }
 
   // Resaltado de textos: cada ~0.3s, cada texto pone en negrita las palabras
   // que coincidan con tags de objetos cercanos. Umbral de distancia para que
