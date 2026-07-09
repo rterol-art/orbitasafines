@@ -392,3 +392,43 @@ Cuando un punto viajero recorre la relación entre dos objetos, a veces
 comparten — la palabra que los une, emergiendo en el trayecto y disolviéndose.
 No es un nodo de un diagrama: es niebla conceptual, el concepto visto de paso.
 Los tags dejan de ser invisibles sin convertirse en etiquetas fijas.
+
+---
+
+## v12 — panel de administración + correcciones
+
+### Correcciones
+- **Cámara con ratón**: el click para centrar/seguir ahora funciona con ratón
+  (el pointerup se escucha en window, no en el canvas, que OrbitControls
+  capturaba). Sigue distinguiendo click de arrastre.
+- **Esfera de carga**: ahora se oculta por completo (visibility, no solo
+  opacidad) al terminar la carga; la animación de pulso solo corre mientras
+  está activa.
+
+### Panel (admin.html)
+Herramienta para generar los JSON con formularios y sliders, sin escribirlos
+a mano. Acceso con usuario/contraseña (puerta al panel; NO sube al repo por
+seguridad — ver nota abajo). Genera el .json (y descarga el archivo PNG/GLB),
+que luego subes a mano a objects/ en GitHub.
+
+**Por qué no sube solo**: un panel en GitHub Pages es código público; meter
+ahí un token de escritura de GitHub lo expondría a cualquiera (control total
+del repo). El panel genera los archivos y tú los subes con dos clics — el repo
+queda seguro. Para subida automática habría que correr el panel en local con
+el token guardado solo en el navegador.
+
+---
+
+## v13 — panel local con subida directa y gestión
+
+El panel (admin.html) ahora:
+- **Solo funciona en local** (file:// o localhost). En un dominio público se
+  bloquea, para no exponer nunca el token.
+- **Sube directamente** el .json y el .glb/.png a objects/ vía API de GitHub.
+- **Gestiona lo subido**: lista los objetos (con miniatura de las imágenes),
+  permite BORRAR (json + archivo) y EDITAR (carga los valores en el formulario,
+  modificas, resubes — el archivo pesado no se re-sube, solo el json).
+- **Token en localStorage**, nunca en el código. Botón "olvidar token".
+
+Requiere un Fine-grained token de GitHub con permiso Contents: Read and write
+sobre el repo del espacio. Se introduce una vez y queda guardado en el navegador.

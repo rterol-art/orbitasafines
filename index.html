@@ -78,11 +78,16 @@
       background: radial-gradient(circle,
         rgba(180,170,200,0.28) 0%, rgba(180,170,200,0.10) 40%, rgba(180,170,200,0) 70%);
       opacity: 0;
-      transition: opacity 0.8s ease;
+      visibility: hidden;
+      transition: opacity 0.6s ease, visibility 0s linear 0.6s;
       pointer-events: none;
+    }
+    #loader.on {
+      opacity: 1;
+      visibility: visible;
+      transition: opacity 0.6s ease;
       animation: loaderPulse 2.2s ease-in-out infinite;
     }
-    #loader.on { opacity: 1; }
     @keyframes loaderPulse {
       0%,100% { transform: scale(0.9); }
       50% { transform: scale(1.12); }

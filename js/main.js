@@ -80,24 +80,28 @@ function onPointerDown(e) {
 }
 
 function onPointerUp(e) {
-  // distinguir click de arrastre (orbit): si el puntero se movió mucho, no es click
   if (!_pointerDownPos) return;
   const moved = Math.hypot(e.clientX - _pointerDownPos.x, e.clientY - _pointerDownPos.y);
   _pointerDownPos = null;
-  if (moved > 6) return;
+  if (moved > 6) return; // fue un arrastre (orbit), no un click
 
   const rect = renderer.domElement.getBoundingClientRect();
+  // solo cuenta si el click cae dentro del canvas
+  if (e.clientX < rect.left || e.clientX > rect.right ||
+      e.clientY < rect.top || e.clientY > rect.bottom) return;
   pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(pointer, camera);
+  // raycast SOLO contra los roots de objetos (no sprites/puntos/estelas)
   const roots = objects.map(o => o.root);
   const hits = raycaster.intersectObjects(roots, true);
   if (hits.length) {
     const root = objectRootFromHit(hits[0].object);
     if (root) selectObject(root);
   } else {
-    releaseFollow(); // click en el vacío: soltar
+    releaseFollow();
   }
+}
 }
 
 function selectObject(root) {
@@ -120,7 +124,10 @@ const _retargetTo = new THREE.Vector3();
 let _retargeting = false;
 
 renderer.domElement.addEventListener('pointerdown', onPointerDown);
-renderer.domElement.addEventListener('pointerup', onPointerUp);
+// pointerup en WINDOW, no en el canvas: OrbitControls captura el puntero
+// durante el arrastre y el pointerup no siempre llega al canvas (por eso
+// fallaba con ratón). En window siempre lo recibimos.
+window.addEventListener('pointerup', onPointerUp);
 // doble click o Escape suelta el seguimiento
 window.addEventListener('keydown', e => { if (e.key === 'Escape') releaseFollow(); });
 
