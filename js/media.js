@@ -184,7 +184,7 @@ export function updateBillboard(group, camera, t, seed) {
 }
 
 // ============================================================
-// CONEXIONES — puntos viajeros (Sin texto flotante)
+// CONEXIONES — puntos viajeros (sin texto flotante)
 // En vez de líneas dibujadas, pequeños puntos que de vez en cuando viajan en
 // línea recta de un objeto a otro relacionado. Una señal que se transmite,
 // no un vínculo permanente. Discretos, ocasionales.
@@ -210,8 +210,7 @@ export class ConnectionLines {
       }));
       sprite.scale.setScalar(this.dotSize);
       sprite.visible = false;
-      this.scene.add(sprite);
-      
+      scene.add(sprite);
       // cola: puntitos más pequeños y tenues que siguen al principal
       const tail = [];
       for (let k = 0; k < this.trailDots; k++) {
@@ -221,7 +220,7 @@ export class ConnectionLines {
         }));
         ts.scale.setScalar(this.dotSize * (0.7 - k * 0.15));
         ts.visible = false;
-        this.scene.add(ts);
+        scene.add(ts);
         tail.push(ts);
       }
       this.travelers.push({ sprite, tail, a: null, b: null, t: 0, dur: 0, history: [] });
@@ -248,11 +247,7 @@ export class ConnectionLines {
       if (tr.history.length > tr.tail.length) tr.history.pop();
       tr.tail.forEach((ts, k) => {
         const h = tr.history[k];
-        if (h) { 
-          ts.position.copy(h); 
-          ts.material.opacity = fade * 0.5 * (1 - k / tr.tail.length); 
-          ts.visible = true; 
-        }
+        if (h) { ts.position.copy(h); ts.material.opacity = fade * 0.5 * (1 - k / tr.tail.length); ts.visible = true; }
       });
     }
 
@@ -267,17 +262,14 @@ export class ConnectionLines {
     if (!this.pairs || !this.pairs.length) return;
     const tr = this.travelers.find(t => !t.a);
     if (!tr) return;
-    
     let total = 0;
     for (const p of this.pairs) total += p.w;
     let r = Math.random() * total;
     let chosen = this.pairs[0];
     for (const p of this.pairs) { r -= p.w; if (r <= 0) { chosen = p; break; } }
-    
     if (!chosen.a.parent || !chosen.b.parent) return;
     if (Math.random() < 0.5) { tr.a = chosen.a; tr.b = chosen.b; }
     else { tr.a = chosen.b; tr.b = chosen.a; }
-    
     tr.a.getWorldPosition(_tmpA);
     tr.b.getWorldPosition(_tmpB);
     tr.dur = Math.max(0.3, _tmpA.distanceTo(_tmpB) / this.speed);

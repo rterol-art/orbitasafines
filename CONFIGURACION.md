@@ -432,3 +432,22 @@ El panel (admin.html) ahora:
 
 Requiere un Fine-grained token de GitHub con permiso Contents: Read and write
 sobre el repo del espacio. Se introduce una vez y queda guardado en el navegador.
+
+---
+
+## v15 — la búsqueda reorganiza
+
+Buscar YA NO oculta el resto. En su lugar:
+- Si todas las coincidencias ya están en escena, se **agrupan hacia un punto foco**
+  delante de la cámara (constelación por concepto). El resto es empujado
+  ligeramente hacia afuera pero PERMANECE visible.
+- Si faltan coincidencias, la escena se recarga incluyendo las nuevas y también
+  otras al azar como fondo, y luego aplica el foco.
+- Sin coincidencias, no cambia nada: el HUD indica "nada respondió a esa frase".
+
+El foco es persistente: la constelación se mantiene hasta que buscas otra cosa,
+pulsas "azar" (limpia todo y reconstruye), o pulsas Enter con el buscador vacío
+(solo suelta el foco, la escena sigue).
+
+Al soltar el foco, los objetos que se habían acercado vuelven poco a poco a sus
+hogares — la relajación es progresiva, no un salto.

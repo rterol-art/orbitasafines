@@ -100,6 +100,27 @@ export class RelationField {
     this._d = new THREE.Vector3();
     this._pt = new THREE.Vector3();
     this._colliding = new Set();
+
+    // Foco de búsqueda: cuando activo, los nodos marcados en `matched`
+    // se atraen al punto `focusPoint`; los no marcados son ligeramente
+    // empujados hacia afuera. Se desactiva poniendo focusActive=false.
+    this.focusActive = false;
+    this.focusPoint = new THREE.Vector3(0, 0, 0);
+    this.matched = new Set();       // set de root.uuid de objetos coincidentes
+    this.focusPull = opts.focusPull ?? 0.9;   // atracción de los coincidentes al foco
+    this.focusPush = opts.focusPush ?? 0.25;  // empujón de los NO coincidentes hacia afuera
+  }
+
+  // Activa el modo búsqueda: agrupa los objetos "matched" alrededor de "point"
+  // sin ocultar el resto. matchedRoots = array de root de Three de los coincidentes.
+  setFocus(matchedRoots, point) {
+    this.matched = new Set(matchedRoots.map(r => r.uuid));
+    this.focusPoint.copy(point);
+    this.focusActive = true;
+  }
+  clearFocus() {
+    this.matched.clear();
+    this.focusActive = false;
   }
 
   // Algunos objetos orbitan a OTRO objeto en vez de a un punto fijo: los que
@@ -203,7 +224,33 @@ export class RelationField {
 
       // Resorte suave de regreso al hogar (evita fuga del encuadre)
       this._d.subVectors(ni.home, ni.anchor);
-      this._f.addScaledVector(this._d, this.homePull * (ni._orbitTarget >= 0 ? 2.5 : 1));
+      // durante la búsqueda, los NO coincidentes tienen homePull reducido
+      // para que el empuje del foco pueda alejarlos un poco de su hogar
+      const homeMul = (this.focusActive && !this.matched.has(ni.root.uuid)) ? 0.35 : 1;
+      this._f.addScaledVector(this._d, this.homePull * homeMul * (ni._orbitTarget >= 0 ? 2.5 : 1));
+
+      // Foco de búsqueda: coincidentes tiran al punto foco, no coincidentes
+      // son empujados suavemente hacia afuera. No oculta a nadie.
+      if (this.focusActive) {
+        if (this.matched.has(ni.root.uuid)) {
+          this._d.subVectors(this.focusPoint, ni.anchor);
+          const dist = this._d.length();
+          if (dist > 0.001) {
+            this._d.divideScalar(dist);
+            const strength = this.focusPull * Math.min(dist, 5) * 0.4;
+            this._f.addScaledVector(this._d, strength);
+          }
+        } else {
+          this._d.subVectors(ni.anchor, this.focusPoint);
+          const dist = this._d.length();
+          if (dist > 0.001) {
+            this._d.divideScalar(dist);
+            // constante hasta cierta distancia; decae solo cuando ya están lejos
+            const strength = this.focusPush * (dist < 6 ? 1 : 6 / dist);
+            this._f.addScaledVector(this._d, strength);
+          }
+        }
+      }
 
       if (this._f.length() > this.maxForce) this._f.setLength(this.maxForce);
       ni.vel.addScaledVector(this._f, h);

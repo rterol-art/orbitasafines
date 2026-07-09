@@ -484,7 +484,19 @@ async function init() {
 
 // ---------- Buscador y azar ----------
 function randomize() {
+  // El azar reconstruye la escena y suelta cualquier foco de búsqueda activo.
+  if (relations) relations.clearFocus();
   return populate([...catalog].sort(() => Math.random() - 0.5).slice(0, CONFIG.maxObjects));
+}
+
+// Calcula un punto delante de la cámara para que la constelación buscada
+// se forme donde la mirada del visitante está apuntando.
+function focusPointInFrontOfCamera(distance = 4) {
+  const p = new THREE.Vector3();
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+  p.copy(camera.position).addScaledVector(dir, distance);
+  return p;
 }
 
 function setupSearch() {
@@ -495,10 +507,50 @@ function setupSearch() {
   input.addEventListener('keydown', async (e) => {
     if (e.key !== 'Enter') return;
     const phrase = input.value.trim();
-    if (!phrase) { await randomize(); return; }
-    const res = search(phrase, catalog, { max: CONFIG.maxObjects, fallback: CONFIG.searchFallback });
-    await populate(res.objects);
-    if (res.mode === 'fallback') setHud('nada respondió a esa frase', true);
+    if (!phrase) {
+      // Enter vacío: soltar el foco sin reconstruir (mantiene la escena, solo
+      // deshace la reorganización).
+      if (relations) relations.clearFocus();
+      setHud(`${objects.length} objetos`, true);
+      return;
+    }
+
+    // Buscar en el CATÁLOGO ENTERO (no solo lo cargado): así podemos traer
+    // objetos coincidentes que no estén en escena actualmente, y reorganizar.
+    const res = search(phrase, catalog, { max: CONFIG.maxObjects, fallback: 'none' });
+
+    // Rutas según qué encontramos:
+    // 1. Coincidencias TODAS ya en escena → reorganizar sin recargar.
+    // 2. Alguna coincidencia falta en escena → recargar cambiando la selección,
+    //    y aplicar el foco al terminar la carga.
+    // 3. Sin coincidencias → HUD lo dice, la escena no cambia ni se reorganiza.
+    if (!res.objects.length) {
+      setHud('nada respondió a esa frase', true);
+      if (relations) relations.clearFocus();
+      return;
+    }
+
+    const inScene = new Map(objects.map(o => [o.meta.file ?? o.meta.text, o.root]));
+    const matched = res.objects.map(m => inScene.get(m.file ?? m.text)).filter(Boolean);
+    const allInScene = matched.length === res.objects.length;
+
+    if (!allInScene) {
+      // Necesitamos recargar la escena para incluir los que faltan. Mezclamos:
+      // los coincidentes primero, luego rellenamos con otros del catálogo hasta
+      // el cap — así el resto sigue habitando el espacio.
+      const others = catalog.filter(m => !res.objects.includes(m))
+        .sort(() => Math.random() - 0.5);
+      const selection = [...res.objects, ...others].slice(0, CONFIG.maxObjects);
+      await populate(selection);
+      // tras populate hay nuevos roots; recalcular matches
+      const inSceneNow = new Map(objects.map(o => [o.meta.file ?? o.meta.text, o.root]));
+      const matchedNow = res.objects.map(m => inSceneNow.get(m.file ?? m.text)).filter(Boolean);
+      if (relations) relations.setFocus(matchedNow, focusPointInFrontOfCamera());
+    } else {
+      // Todas las coincidencias ya están en escena: simplemente reorganizar.
+      if (relations) relations.setFocus(matched, focusPointInFrontOfCamera());
+    }
+    setHud(`«${phrase}» · ${res.objects.length} coincid.`, true);
   });
 }
 
