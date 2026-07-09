@@ -102,7 +102,6 @@ function onPointerUp(e) {
     releaseFollow();
   }
 }
-}
 
 function selectObject(root) {
   followed = { root };
