@@ -7,6 +7,17 @@
     "divagar",
     "rumbo"
   ],
+  "expand": [
+  "capicúa", "simetría", "bifronte", "reversible", "anagrama",
+  "oscuridad", "madrugada", "velada", "penumbra", "sombras", "vigilia",
+  "caminata", "recorrido", "trayecto", "vuelta", "marcha", "andanza",
+  "acompañamiento", "sociedad", "grupo", "presencia", "camaradería",
+  "vagar", "deambular", "errar", "merodear", "dispersarse", "perderse", "vagabundear",
+  "dirección", "norte", "orientación", "camino", "derrotero", "vía", "sentido",
+  "girar", "rotar", "circular", "orbitar", "rodear",
+  "llama", "lumbre", "incendio", "hoguera", "brasa", "ardor", "flama",
+  "devorar", "agotar", "quemar", "calcinar", "destruir", "abrasar", "desgastar", "extinguir"
+],
   "text": "Damos vueltas toda la noche\ny el fuego nos consume",
   "size": 0.7,
   "weight": 300,
