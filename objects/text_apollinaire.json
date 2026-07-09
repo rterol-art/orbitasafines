@@ -20,6 +20,7 @@
 ],
   "text": "Damos vueltas toda la noche\ny el fuego nos consume",
   "size": 0.7,
+  "color": "#c9bfd6",
   "weight": 300,
   "opacity": 0.9,
   "movement": {
@@ -29,5 +30,6 @@
       "radius": 2.9,
       "mutation": 0.04
     }
+    "layers": [{ "type": "jitter", "amplitude": 0.004 }]
   }
 }
