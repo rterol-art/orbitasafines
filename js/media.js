@@ -353,12 +353,11 @@ export class Trails {
           // Eco de plano: clona su textura tal cual. La opacidad se modula
           // por relevancia: menos relevante = más eco (más borroso).
           const relevance = o.root.userData.relevance ?? 1;
-          const relFactor = 0.15 + (1 - relevance) * 1.85;
+          const relFactor = 0.2 + (1 - relevance) * 1.3;
           this._emitPlaneEcho(o.root, plane, this.maxOpacity * relFactor);
-        } else if (o.root.userData.isModel) {
-          // Huella de silueta: disco suave con el color/tamaño cacheados
-          this._emitFootprint(o.root, camera);
         }
+        // Los modelos 3D ya no dejan huella de disco: su lejanía se lee
+        // atenuando y vibrando su propio cuerpo (applyRelevanceToBody).
       }
     }
 
@@ -393,32 +392,10 @@ export class Trails {
     this.samples.push({ mesh: echo, age: 0, base: opacity, billboard: false });
   }
 
-  _emitFootprint(root, camera) {
-    // color y radio se cachean la primera vez (coste amortizado)
-    let cache = root.userData.footprint;
-    if (!cache) {
-      cache = computeFootprint(root);
-      root.userData.footprint = cache;
-    }
-    // La ESTELA es lectura de la lejanía respecto a lo invocado. Cuanto menos
-    // relevante es el objeto (más lejos del central), más estela deja. Un
-    // objeto plenamente relevante casi no deja rastro; el fondo se convierte
-    // en niebla. Es un mapeo suave, no un salto.
-    const relevance = root.userData.relevance ?? 1;
-    const relFactor = 0.15 + (1 - relevance) * 1.85; // 0.15 (nítido) → 2.0 (fantasmal)
-    const op = this.printOpacity * (root.userData.trailStrength ?? 1) * relFactor;
-    const echo = new THREE.Mesh(_discGeo, new THREE.MeshBasicMaterial({
-      map: this._softTex, color: cache.color, transparent: true,
-      opacity: op, depthWrite: false, side: THREE.DoubleSide,
-      toneMapped: false, blending: THREE.AdditiveBlending,
-    }));
-    root.getWorldPosition(echo.position);
-    const r = cache.radius * (root.scale.x || 1);
-    echo.scale.setScalar(r * 2.4);
-    if (camera) echo.quaternion.copy(camera.quaternion);
-    this.scene.add(echo);
-    this.samples.push({ mesh: echo, age: 0, base: op, billboard: true });
-  }
+  // Los modelos 3D YA NO dejan huella de disco (la "bola" difusa se eliminó:
+  // era una mancha limpia, lo contrario de la degradación rota que buscamos).
+  // La lectura de lejanía de un modelo se hace atenuando y vibrando su propio
+  // cuerpo (ver applyRelevanceToBody en main.js), no dejando un rastro genérico.
 
   // Eliminar todos los ecos vivos (al reconstruir la escena).
   clear() {

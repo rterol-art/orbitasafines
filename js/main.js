@@ -600,6 +600,65 @@ function updateTextHighlights() {
   }
 }
 
+// Atenúa y hace vibrar el CUERPO de cada objeto según su relevancia respecto
+// a lo invocado. Esta es la lectura principal de la lejanía semántica:
+// - relevancia alta  → objeto nítido, quieto, opaco
+// - relevancia baja  → objeto atenuado (pero VISIBLE, espectral) y vibrando
+// Vale para los tres tipos. La vibración es un desplazamiento del root, no
+// una deformación, así que es barata y no rompe la malla.
+const _relJit = new THREE.Vector3();
+function applyRelevanceToBody(t) {
+  for (const o of objects) {
+    const root = o.root;
+    const rel = root.userData.relevance ?? 1;
+
+    // --- Opacidad del cuerpo ---
+    // Mapa: rel 1 → 1.0 (opaco), rel 0 → 0.42 (espectral pero claramente visible).
+    // Antes el fondo quedaba casi invisible; ahora los lejanos se ven "un poco
+    // más", como pediste. Suelo alto a propósito.
+    const bodyOpacity = 0.42 + rel * 0.58;
+
+    // guardar/leer los materiales del objeto una sola vez
+    let mats = root.userData._relMats;
+    if (!mats) {
+      mats = [];
+      root.traverse(n => {
+        if (n.material) {
+          const arr = Array.isArray(n.material) ? n.material : [n.material];
+          for (const m of arr) {
+            if (m._baseOpacity == null) m._baseOpacity = (m.opacity != null ? m.opacity : 1);
+            mats.push(m);
+          }
+        }
+      });
+      root.userData._relMats = mats;
+    }
+    for (const m of mats) {
+      const target = m._baseOpacity * bodyOpacity;
+      if (bodyOpacity < 0.999) { m.transparent = true; }
+      m.opacity += (target - m.opacity) * 0.1; // suavizado
+    }
+
+    // --- Vibración por baja relevancia ---
+    // Cuanto menos relevante, más tiembla. La vibración da esa cualidad
+    // inestable, de señal que se pierde, sin necesidad de deformar la malla.
+    const vib = (1 - rel);
+    if (vib > 0.02) {
+      if (!root.userData._relHome) root.userData._relHome = root.position.clone();
+      const amp = vib * 0.06;             // amplitud proporcional a la lejanía
+      const fx = 11 + (root.userData.seed ?? 0) * 3;
+      const fy = 13 + (root.userData.seed ?? 0) * 2;
+      _relJit.set(
+        Math.sin(t * fx) * amp,
+        Math.cos(t * fy) * amp,
+        Math.sin(t * (fx + fy) * 0.5) * amp
+      );
+      // aplicar como offset relativo a la posición actual (que el bucle ya movió)
+      root.position.add(_relJit);
+    }
+  }
+}
+
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.1); // clamp: pestañas en background
@@ -620,6 +679,9 @@ function animate() {
     // Publicar la relevancia de cada nodo a su root.userData para que las
     // estelas y demás lectores visuales la usen sin acoplarse al RelationField.
     for (const n of relations.nodes) n.root.userData.relevance = n.relevance;
+    // Atenuar y vibrar el CUERPO de cada objeto según su relevancia: es la
+    // lectura principal de la lejanía. Vale para modelos, imágenes y textos.
+    applyRelevanceToBody(t);
   }
 
   // Resaltado de textos: cada ~0.3s, cada texto pone en negrita las palabras

@@ -478,3 +478,26 @@ RELACIÓN con lo invocado.
 - Modular jitter, respiración, deshielo, costura por relevancia (ahora solo
   la ESTELA responde plenamente).
 - Simplificar el panel de admin: quitar sliders de efectos que ya no importan.
+
+---
+
+## v18 — el cuerpo lee la lejanía + fuera la bola
+
+Tres correcciones sobre v17:
+
+1. **La "bola" de los modelos 3D ELIMINADA.** Era una huella de disco difuso
+   con el color medio del modelo — una mancha limpia, lo contrario de la
+   degradación rota. Ya no existe.
+
+2. **Los modelos 3D ya responden a la relevancia** (antes salían siempre al
+   100%). La lectura de lejanía ahora atenúa y vibra el CUERPO del objeto,
+   no una estela aparte. Vale para modelos, imágenes y textos por igual.
+
+3. **Los lejanos se ven más y vibran.** Antes el fondo quedaba casi invisible
+   (espectros apenas perceptibles). Ahora:
+   - opacidad del cuerpo: rel 1 → opaco; rel 0 → 0.42 (espectral pero visible).
+   - vibración: crece cuando baja la relevancia. Lo cercano está quieto y
+     nítido; lo lejano tiembla como señal que se pierde.
+
+Pendiente aún: modular jitter/respiración/deshielo/costura por relevancia de
+forma unificada, y simplificar el panel.
